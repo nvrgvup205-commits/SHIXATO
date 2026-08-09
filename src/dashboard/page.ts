@@ -1,7 +1,17 @@
 /** SHIXATO admin dashboard — PIN login + rich AliExpress filters */
 
+import { PRODUCT_CATEGORIES } from "../data/categories";
+
 export function renderDashboardPage(storeDomain: string): string {
   const store = storeDomain.replace(/^https?:\/\//, "").replace(/\/$/, "");
+  const categoryOptions = [
+    `<option value="">— اختَر فئة (اختياري مع كلمة بحث) —</option>`,
+    ...PRODUCT_CATEGORIES.map(
+      (c) =>
+        `<option value="${c.id}">${c.labelAr}</option>`,
+    ),
+  ].join("");
+
   return `<!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
@@ -186,11 +196,20 @@ export function renderDashboardPage(storeDomain: string): string {
       </div>
 
       <section id="tab-search" class="panel">
-        <label for="query">كلمة البحث</label>
-        <div style="display:flex;gap:.6rem;flex-wrap:wrap">
-          <input id="query" type="search" placeholder="phone case, earbuds, led light..." style="flex:1 1 240px" />
-          <button class="btn btn-accent" id="searchBtn" type="button">بحث بالفلاتر</button>
+        <div class="filters" style="margin-bottom:.75rem">
+          <div class="wide">
+            <label for="category">الفئة</label>
+            <select id="category">${categoryOptions}</select>
+          </div>
+          <div class="wide">
+            <label for="query">كلمة البحث (اختياري إذا اخترت فئة)</label>
+            <div style="display:flex;gap:.6rem;flex-wrap:wrap">
+              <input id="query" type="search" placeholder="اتركه فارغًا لاستخدام الفئة… أو اكتب كلمة مثل phone case" style="flex:1 1 240px" />
+              <button class="btn btn-accent" id="searchBtn" type="button">بحث بالفلاتر</button>
+            </div>
+          </div>
         </div>
+        <p class="hint">لو كلمة البحث فاضية: لازم تختار <strong>فئة</strong> — ويجيب تصنيفات تحتها مع باقي الفلاتر كما هي.</p>
 
         <div class="filters" id="filters">
           <div>
@@ -433,6 +452,7 @@ export function renderDashboardPage(storeDomain: string): string {
     function collectFilters() {
       return {
         query: $("query").value.trim(),
+        category: $("category").value || undefined,
         page: 1,
         sort: $("sort").value,
         minPrice: num("minPrice"),
@@ -504,7 +524,9 @@ export function renderDashboardPage(storeDomain: string): string {
 
     async function runSearch() {
       const filters = collectFilters();
-      if (!filters.query || filters.query.length < 2) return toast("اكتب كلمة بحث", true);
+      if ((!filters.query || filters.query.length < 2) && !filters.category) {
+        return toast("اختر فئة أو اكتب كلمة بحث", true);
+      }
       $("searchBtn").disabled = true;
       $("searchStatus").textContent = "جاري البحث وتصفية النتائج...";
       try {
@@ -514,9 +536,13 @@ export function renderDashboardPage(storeDomain: string): string {
         });
         const data = res.data || {};
         const items = data.results || [];
+        const via = (data.filtersApplied && data.filtersApplied.categoryLabelAr)
+          ? (" · فئة: " + data.filtersApplied.categoryLabelAr)
+          : "";
         $("searchStatus").textContent =
           "نتائج: " + (data.totalAfterFilter ?? items.length) +
-          " بعد الفلتر / " + (data.totalParsed ?? items.length) + " قبل الفلتر المحلي";
+          " بعد الفلتر / " + (data.totalParsed ?? items.length) + " قبل الفلتر المحلي" +
+          " · بحث: " + (data.query || "") + via;
         renderResults(items);
         if (!items.length) toast("لا نتائج مطابقة — خفّف الفلاتر", true);
       } catch (e) {
