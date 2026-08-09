@@ -1,6 +1,8 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { logger } from "hono/logger";
+import { renderDashboardPage } from "./dashboard/page";
+import auth from "./routes/auth";
 import products from "./routes/products";
 import sync from "./routes/sync";
 import type { Env } from "./types";
@@ -12,25 +14,37 @@ app.use("*", logger());
 app.use(
   "*",
   cors({
-    origin: "*",
+    origin: (origin) => origin || "*",
     allowMethods: ["GET", "POST", "OPTIONS"],
     allowHeaders: ["Content-Type", "Authorization", "X-API-Key"],
+    credentials: true,
   }),
 );
 
-app.get("/", (c) =>
-  c.json({
+app.get("/", (c) => {
+  const accept = c.req.header("Accept") ?? "";
+  if (accept.includes("text/html")) {
+    return c.redirect("/dashboard", 302);
+  }
+  return c.json({
     ok: true,
     service: "shixato-automation",
     environment: c.env.ENVIRONMENT ?? "unknown",
+    dashboard: "/dashboard",
     endpoints: {
       health: "GET /health",
+      login: "POST /api/auth/login",
+      search: "POST /api/products/search",
       preview: "POST /api/products/preview",
       import: "POST /api/products/import",
       list: "GET /api/products",
       logs: "GET /api/sync/logs",
     },
-  }),
+  });
+});
+
+app.get("/dashboard", (c) =>
+  c.html(renderDashboardPage(c.env.SHOPIFY_STORE_DOMAIN || "shxato.myshopify.com")),
 );
 
 app.get("/health", (c) =>
@@ -42,10 +56,17 @@ app.get("/health", (c) =>
   }),
 );
 
+app.route("/api/auth", auth);
 app.route("/api/products", products);
 app.route("/api/sync", sync);
 
-app.notFound((c) => c.json({ ok: false, error: "Not found" }, 404));
+app.notFound((c) => {
+  const accept = c.req.header("Accept") ?? "";
+  if (accept.includes("text/html")) {
+    return c.redirect("/dashboard", 302);
+  }
+  return c.json({ ok: false, error: "Not found" }, 404);
+});
 
 app.onError((err, c) => {
   console.error(err);

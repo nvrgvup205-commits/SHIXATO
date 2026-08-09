@@ -18,6 +18,8 @@ export interface Env {
   SUPABASE_URL: string;
   SUPABASE_SERVICE_ROLE_KEY: string;
   API_KEY: string;
+  /** Simple dashboard login PIN (default 1111) */
+  DASHBOARD_PIN?: string;
   DEFAULT_MARKUP?: string;
   MAX_PRODUCT_IMAGES?: string;
   OPENAI_API_KEY?: string;
@@ -91,6 +93,43 @@ export interface AiFilterResult {
   tags?: string[];
 }
 
+/** Search-result card used when PDP scrape is blocked */
+export interface AliExpressListing {
+  aliexpressId: string;
+  title: string;
+  url: string;
+  image: string;
+  images?: string[];
+  /** Current sale / card price */
+  originalPrice: number;
+  /** List price before discount when available */
+  listPrice?: number;
+  currency: string;
+  sold?: string;
+  soldCount?: number;
+  rating?: number;
+  reviewCount?: number;
+  /** Estimated share of non-5★ reviews (0–100) from available card signals */
+  negativeRateEstimate?: number;
+  discountPercent?: number;
+  badges?: string[];
+  isChoice?: boolean;
+  isFreeShipping?: boolean;
+  isViral?: boolean;
+  shipFrom?: string;
+}
+
+export interface AliExpressSearchResult {
+  query: string;
+  page: number;
+  filtersApplied: Record<string, unknown>;
+  results: AliExpressListing[];
+  totalParsed: number;
+  totalAfterFilter: number;
+}
+
+export type { ProductSearchFilters, SearchSort } from "./search";
+
 export interface ImportProductInput {
   url?: string;
   aliexpressId?: string;
@@ -100,6 +139,11 @@ export interface ImportProductInput {
   sellingPrice?: number;
   /** Markup multiplier if sellingPrice omitted (default from env) */
   markup?: number;
+  /**
+   * When AliExpress product pages are blocked, pass listing data from search
+   * so import can proceed without a full PDP scrape.
+   */
+  listing?: AliExpressListing;
 }
 
 export interface ImportProductResult {

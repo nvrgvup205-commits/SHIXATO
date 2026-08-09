@@ -24,6 +24,8 @@ compatibility_flags = ["nodejs_compat"]
 ENVIRONMENT = "production"
 SHOPIFY_STORE_DOMAIN = "shxato.myshopify.com"
 SHOPIFY_API_VERSION = "2025-01"
+# Simple dashboard PIN (change via Secret in production if you want)
+DASHBOARD_PIN = "1111"
 # Markup applied when selling_price is not provided (e.g. 1.4 = +40%)
 DEFAULT_MARKUP = "1.4"
 # Max images to push to Shopify per product

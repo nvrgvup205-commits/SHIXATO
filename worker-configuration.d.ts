@@ -8,6 +8,7 @@ interface Env {
   SUPABASE_URL: string;
   SUPABASE_SERVICE_ROLE_KEY: string;
   API_KEY: string;
+  DASHBOARD_PIN?: string;
   DEFAULT_MARKUP?: string;
   MAX_PRODUCT_IMAGES?: string;
   OPENAI_API_KEY?: string;
