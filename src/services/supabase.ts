@@ -33,11 +33,15 @@ export type CreateSyncLogInput = {
   error_message?: string | null;
 };
 
+/** Independent Postgres schema — must be listed under Exposed schemas in Supabase API settings */
+export const SUPABASE_SCHEMA = "shixato" as const;
+
 /**
  * Supabase persistence layer (service_role on Worker only).
+ * All tables live in the isolated `shixato` schema (not public).
  */
 export class SupabaseService {
-  private client: SupabaseClient;
+  private client: SupabaseClient<any, "shixato", "shixato">;
 
   constructor(env: Env) {
     if (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_ROLE_KEY) {
@@ -45,6 +49,7 @@ export class SupabaseService {
     }
 
     this.client = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, {
+      db: { schema: SUPABASE_SCHEMA },
       auth: {
         persistSession: false,
         autoRefreshToken: false,
