@@ -8,7 +8,10 @@ export type SearchSort =
   | "newest";
 
 export interface ProductSearchFilters {
-  query: string;
+  /** Free-text keywords (optional if `category` is set) */
+  query?: string;
+  /** Category id from PRODUCT_CATEGORIES — used when query is empty */
+  category?: string;
   page?: number;
 
   /** URL / SSR filters sent to AliExpress */
