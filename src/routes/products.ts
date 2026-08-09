@@ -1,18 +1,21 @@
 import { Hono } from "hono";
 import { AliExpressService } from "../services/aliexpress";
 import { ImportPipeline } from "../services/pipeline";
-import type { Env, ImportProductInput, ProductStatus } from "../types";
-import { requireApiKey } from "../utils/auth";
+import type { Env, ImportProductInput, ProductSearchFilters, ProductStatus } from "../types";
+import { requireAuth } from "../utils/session";
 import { HttpError } from "../utils/http";
 
 const products = new Hono<{ Bindings: Env }>();
 
-products.get("/", requireApiKey, async (c) => {
+products.get("/", requireAuth, async (c) => {
   const pipeline = new ImportPipeline(c.env);
   const status = c.req.query("status") as ProductStatus | undefined;
   const limit = Number(c.req.query("limit") ?? "50");
   const q = (c.req.query("q") ?? "").trim().toLowerCase();
-  let rows = await pipeline.dbService.listProducts({ status, limit: Math.max(limit, 100) });
+  let rows = await pipeline.dbService.listProducts({
+    status,
+    limit: Math.max(limit, 100),
+  });
   if (q) {
     rows = rows.filter(
       (p) =>
@@ -24,17 +27,11 @@ products.get("/", requireApiKey, async (c) => {
   return c.json({ ok: true, data: rows.slice(0, limit) });
 });
 
-/** Keyword search on AliExpress (wholesale SSR) */
-products.post("/search", requireApiKey, async (c) => {
-  const body = (await c.req.json().catch(() => ({}))) as {
-    query?: string;
-    page?: number;
-  };
+/** Keyword search on AliExpress with rich filters */
+products.post("/search", requireAuth, async (c) => {
+  const body = (await c.req.json().catch(() => ({}))) as ProductSearchFilters;
   try {
-    const data = await new AliExpressService().search(
-      body.query ?? "",
-      Number(body.page ?? 1) || 1,
-    );
+    const data = await new AliExpressService().search(body);
     return c.json({ ok: true, data });
   } catch (err) {
     if (err instanceof HttpError) {
@@ -47,8 +44,7 @@ products.post("/search", requireApiKey, async (c) => {
   }
 });
 
-/** Scrape / listing preview — no DB / Shopify side effects */
-products.post("/preview", requireApiKey, async (c) => {
+products.post("/preview", requireAuth, async (c) => {
   const body = (await c.req.json().catch(() => ({}))) as ImportProductInput;
   const pipeline = new ImportPipeline(c.env);
   try {
@@ -65,8 +61,7 @@ products.post("/preview", requireApiKey, async (c) => {
   }
 });
 
-/** Full pipeline: scrape/listing → AI filter → Supabase → Shopify */
-products.post("/import", requireApiKey, async (c) => {
+products.post("/import", requireAuth, async (c) => {
   const body = (await c.req.json().catch(() => ({}))) as ImportProductInput;
   const pipeline = new ImportPipeline(c.env);
 
@@ -84,7 +79,7 @@ products.post("/import", requireApiKey, async (c) => {
   }
 });
 
-products.get("/:aliexpressId", requireApiKey, async (c) => {
+products.get("/:aliexpressId", requireAuth, async (c) => {
   const aliexpressId = c.req.param("aliexpressId");
   if (!aliexpressId) {
     return c.json({ ok: false, error: "aliexpressId is required" }, 400);

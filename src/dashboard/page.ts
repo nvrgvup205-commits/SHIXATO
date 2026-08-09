@@ -1,4 +1,4 @@
-/** SHIXATO admin dashboard — single HTML document served by the Worker */
+/** SHIXATO admin dashboard — PIN login + rich AliExpress filters */
 
 export function renderDashboardPage(storeDomain: string): string {
   const store = storeDomain.replace(/^https?:\/\//, "").replace(/\/$/, "");
@@ -15,8 +15,7 @@ export function renderDashboardPage(storeDomain: string): string {
     :root {
       --ink: #10231f;
       --muted: #5a6f69;
-      --paper: #f3f6f2;
-      --panel: rgba(255,255,255,0.72);
+      --panel: rgba(255,255,255,0.78);
       --line: rgba(16,35,31,0.12);
       --accent: #0f8a6a;
       --accent-2: #e8ff57;
@@ -30,176 +29,285 @@ export function renderDashboardPage(storeDomain: string): string {
     * { box-sizing: border-box; }
     html, body { margin: 0; min-height: 100%; }
     body {
-      font-family: var(--font);
-      color: var(--ink);
+      font-family: var(--font); color: var(--ink);
       background:
-        radial-gradient(1200px 600px at 10% -10%, rgba(232,255,87,0.45), transparent 55%),
-        radial-gradient(900px 500px at 100% 0%, rgba(15,138,106,0.22), transparent 50%),
+        radial-gradient(1200px 600px at 10% -10%, rgba(232,255,87,0.42), transparent 55%),
+        radial-gradient(900px 500px at 100% 0%, rgba(15,138,106,0.2), transparent 50%),
         linear-gradient(165deg, #eef5ef 0%, #f7faf7 40%, #e7f0ea 100%);
       background-attachment: fixed;
     }
-    body::before {
-      content: "";
-      position: fixed; inset: 0; pointer-events: none; opacity: 0.35;
-      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.45'/%3E%3C/svg%3E");
-      mix-blend-mode: soft-light;
-    }
-    .wrap { width: min(1180px, calc(100% - 2rem)); margin: 0 auto; padding: 1.25rem 0 3rem; position: relative; }
+    .wrap { width: min(1240px, calc(100% - 2rem)); margin: 0 auto; padding: 1.25rem 0 3rem; }
     header.appbar {
       display: flex; align-items: center; justify-content: space-between; gap: 1rem;
-      margin-bottom: 1.5rem; animation: rise 0.6s ease both;
+      margin-bottom: 1.25rem; animation: rise .55s ease both;
     }
     .brand {
-      font-family: var(--display); font-weight: 800; font-size: clamp(1.8rem, 4vw, 2.6rem);
-      letter-spacing: -0.04em; line-height: 0.95; margin: 0;
+      font-family: var(--display); font-weight: 800;
+      font-size: clamp(1.8rem, 4vw, 2.6rem); letter-spacing: -0.04em; margin: 0;
     }
     .brand span { color: var(--accent); }
     .store-pill {
-      font-size: 0.85rem; color: var(--muted); border: 1px solid var(--line);
+      font-size: .85rem; color: var(--muted); border: 1px solid var(--line);
       background: var(--panel); backdrop-filter: blur(10px);
-      padding: 0.55rem 0.85rem; border-radius: 999px;
+      padding: .55rem .85rem; border-radius: 999px;
     }
     .panel {
       background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
       box-shadow: var(--shadow); backdrop-filter: blur(14px);
-      padding: 1.1rem 1.2rem; animation: rise 0.7s ease both;
+      padding: 1.1rem 1.2rem; animation: rise .65s ease both;
     }
-    .panel + .panel { margin-top: 1rem; }
-    .gate { max-width: 460px; margin: 12vh auto; }
-    label { display: block; font-size: 0.92rem; font-weight: 600; margin-bottom: 0.4rem; }
+    .gate { max-width: 420px; margin: 14vh auto; text-align: center; }
+    .pin-input {
+      font-size: 1.8rem; letter-spacing: .35em; text-align: center;
+      font-weight: 700; padding: 1rem !important;
+    }
+    label { display: block; font-size: .9rem; font-weight: 600; margin: 0 0 .35rem; }
     input, select, button, textarea {
       font: inherit; border-radius: 12px; border: 1px solid var(--line); background: #fff;
     }
     input, select, textarea {
-      width: 100%; padding: 0.85rem 0.95rem; color: var(--ink);
-      outline: none; transition: border-color .2s, box-shadow .2s;
+      width: 100%; padding: .75rem .85rem; color: var(--ink); outline: none;
     }
     input:focus, select:focus, textarea:focus {
-      border-color: var(--accent); box-shadow: 0 0 0 3px rgba(15,138,106,0.15);
+      border-color: var(--accent); box-shadow: 0 0 0 3px rgba(15,138,106,.15);
     }
-    .row { display: flex; gap: 0.65rem; flex-wrap: wrap; align-items: stretch; }
-    .row > * { flex: 1 1 180px; }
     .btn {
       appearance: none; border: none; cursor: pointer; font-weight: 700;
-      padding: 0.85rem 1.1rem; border-radius: 12px; transition: transform .15s ease, opacity .15s;
+      padding: .8rem 1.05rem; border-radius: 12px; transition: transform .15s, opacity .15s;
     }
-    .btn:active { transform: translateY(1px) scale(0.99); }
-    .btn:disabled { opacity: 0.55; cursor: wait; }
+    .btn:active { transform: translateY(1px) scale(.99); }
+    .btn:disabled { opacity: .55; cursor: wait; }
     .btn-primary { background: var(--ink); color: #fff; }
     .btn-accent { background: var(--accent); color: #fff; }
     .btn-ghost { background: transparent; border: 1px solid var(--line); color: var(--ink); }
-    .tabs { display: flex; gap: 0.4rem; margin-bottom: 1rem; flex-wrap: wrap; }
+    .tabs { display: flex; gap: .4rem; margin-bottom: 1rem; flex-wrap: wrap; }
     .tab {
-      border: 1px solid var(--line); background: rgba(255,255,255,0.5);
-      padding: 0.55rem 0.9rem; border-radius: 999px; cursor: pointer; font-weight: 600;
+      border: 1px solid var(--line); background: rgba(255,255,255,.5);
+      padding: .55rem .9rem; border-radius: 999px; cursor: pointer; font-weight: 600;
     }
     .tab.active { background: var(--ink); color: #fff; border-color: var(--ink); }
-    .hint { color: var(--muted); font-size: 0.9rem; margin: 0.35rem 0 0.9rem; }
+    .hint { color: var(--muted); font-size: .88rem; margin: .35rem 0 .8rem; }
+    .filters {
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+      gap: .7rem; margin-top: .6rem;
+    }
+    .filters .wide { grid-column: 1 / -1; }
+    .check {
+      display: flex; align-items: center; gap: .45rem; font-size: .88rem; font-weight: 600;
+      padding: .7rem .75rem; border: 1px solid var(--line); border-radius: 12px; background: #fff;
+    }
+    .check input { width: auto; }
     .grid {
       display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
-      gap: 0.9rem; margin-top: 1rem;
+      gap: .9rem; margin-top: 1rem;
     }
     .product {
       border: 1px solid var(--line); border-radius: 16px; background: #fff;
       overflow: hidden; cursor: pointer; text-align: start;
-      transition: transform .2s ease, box-shadow .2s ease; animation: pop 0.45s ease both;
+      transition: transform .2s, box-shadow .2s; animation: pop .4s ease both;
     }
     .product:hover { transform: translateY(-3px); box-shadow: var(--shadow); }
-    .product img {
-      width: 100%; aspect-ratio: 1; object-fit: cover; display: block; background: #e8eee9;
-    }
-    .product .meta { padding: 0.75rem 0.8rem 0.9rem; }
+    .product img { width: 100%; aspect-ratio: 1; object-fit: cover; display: block; background: #e8eee9; }
+    .product .meta { padding: .75rem .8rem .9rem; }
     .product h3 {
-      margin: 0 0 0.35rem; font-size: 0.92rem; line-height: 1.35;
+      margin: 0 0 .35rem; font-size: .9rem; line-height: 1.35;
       display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
     }
     .price { font-weight: 700; color: var(--accent); }
-    .sub { font-size: 0.8rem; color: var(--muted); margin-top: 0.2rem; }
+    .sub { font-size: .78rem; color: var(--muted); margin-top: .2rem; }
+    .badges { display: flex; flex-wrap: wrap; gap: .25rem; margin-top: .4rem; }
+    .badge {
+      font-size: .68rem; font-weight: 700; padding: .12rem .4rem; border-radius: 999px;
+      background: #eef6f2; color: var(--accent);
+    }
     .toast {
       position: fixed; bottom: 1rem; left: 50%; transform: translateX(-50%) translateY(120%);
-      background: var(--ink); color: #fff; padding: 0.75rem 1rem; border-radius: 999px;
-      z-index: 50; transition: transform .25s ease; max-width: min(92vw, 520px);
-      text-align: center; font-size: 0.92rem;
+      background: var(--ink); color: #fff; padding: .75rem 1rem; border-radius: 999px;
+      z-index: 50; transition: transform .25s; max-width: min(92vw, 520px);
+      text-align: center; font-size: .92rem;
     }
     .toast.show { transform: translateX(-50%) translateY(0); }
     .toast.err { background: var(--danger); }
     .hidden { display: none !important; }
-    table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
-    th, td { text-align: start; padding: 0.65rem 0.4rem; border-bottom: 1px solid var(--line); vertical-align: top; }
+    table { width: 100%; border-collapse: collapse; font-size: .9rem; }
+    th, td { text-align: start; padding: .65rem .4rem; border-bottom: 1px solid var(--line); vertical-align: top; }
     th { color: var(--muted); font-weight: 600; }
     .status {
-      display: inline-block; padding: 0.15rem 0.5rem; border-radius: 999px;
-      font-size: 0.75rem; font-weight: 700; background: #eef2ef;
+      display: inline-block; padding: .15rem .5rem; border-radius: 999px;
+      font-size: .75rem; font-weight: 700; background: #eef2ef;
     }
     .status.synced { background: #dcfae6; color: var(--ok); }
     .status.failed, .status.filtered_out { background: #fee4e2; color: var(--danger); }
     .drawer-backdrop {
-      position: fixed; inset: 0; background: rgba(16,35,31,0.35); z-index: 40;
+      position: fixed; inset: 0; background: rgba(16,35,31,.35); z-index: 40;
       opacity: 0; pointer-events: none; transition: opacity .2s;
     }
     .drawer-backdrop.open { opacity: 1; pointer-events: auto; }
     .drawer {
-      position: fixed; top: 0; bottom: 0; left: 0; width: min(420px, 100%);
+      position: fixed; top: 0; bottom: 0; left: 0; width: min(440px, 100%);
       background: #fff; z-index: 41; transform: translateX(-105%);
       transition: transform .28s cubic-bezier(.2,.8,.2,1);
       padding: 1.2rem; overflow: auto; box-shadow: var(--shadow);
     }
     .drawer.open { transform: translateX(0); }
     .drawer img { width: 100%; border-radius: 14px; aspect-ratio: 1; object-fit: cover; background: #e8eee9; }
-    .drawer h2 { font-family: var(--display); font-size: 1.35rem; margin: 0.8rem 0 0.4rem; letter-spacing: -0.03em; }
-    @keyframes rise { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
-    @keyframes pop { from { opacity: 0; transform: scale(0.97); } to { opacity: 1; transform: none; } }
-    @media (max-width: 640px) {
-      .drawer { left: 0; right: 0; width: 100%; }
-    }
+    .drawer h2 { font-family: var(--display); font-size: 1.3rem; margin: .8rem 0 .4rem; letter-spacing: -.03em; }
+    .stats { display: grid; grid-template-columns: 1fr 1fr; gap: .5rem; margin: .7rem 0; }
+    .stat { border: 1px solid var(--line); border-radius: 12px; padding: .55rem .65rem; }
+    .stat b { display: block; font-size: .78rem; color: var(--muted); font-weight: 600; }
+    details.more { margin-top: .7rem; }
+    details.more summary { cursor: pointer; font-weight: 700; color: var(--accent); }
+    @keyframes rise { from { opacity: 0; transform: translateY(12px);} to { opacity: 1; transform: none;} }
+    @keyframes pop { from { opacity: 0; transform: scale(.97);} to { opacity: 1; transform: none;} }
   </style>
 </head>
 <body>
   <div class="wrap">
     <header class="appbar">
       <h1 class="brand">SHI<span>XATO</span></h1>
-      <div class="store-pill" id="storePill">${store}</div>
+      <div class="store-pill">${store}</div>
     </header>
 
     <section id="gate" class="panel gate">
-      <h2 style="margin:0 0 .4rem;font-family:var(--display);letter-spacing:-.03em;">دخول لوحة التحكم</h2>
-      <p class="hint">الصق <strong>API_KEY</strong> الذي عيّنته في Cloudflare. يُحفظ محليًا في متصفحك فقط.</p>
-      <label for="apiKey">API_KEY</label>
-      <input id="apiKey" type="password" placeholder="الصق المفتاح هنا" autocomplete="off" />
-      <div class="row" style="margin-top:.8rem">
-        <button class="btn btn-primary" id="saveKeyBtn" type="button">دخول</button>
+      <h2 style="margin:0 0 .35rem;font-family:var(--display);letter-spacing:-.03em;">أدخل الرقم السري</h2>
+      <p class="hint">اكتب الرقم ثم اضغط دخول — الافتراضي: <strong>1111</strong></p>
+      <input id="pin" class="pin-input" type="password" inputmode="numeric" maxlength="12" placeholder="••••" autocomplete="one-time-code" />
+      <div style="margin-top:.9rem">
+        <button class="btn btn-primary" id="loginBtn" type="button" style="width:100%">دخول وشكراً</button>
       </div>
     </section>
 
     <section id="app" class="hidden">
-      <div class="tabs" role="tablist">
-        <button class="tab active" data-tab="search" type="button">بحث علي إكسبريس</button>
+      <div class="tabs">
+        <button class="tab active" data-tab="search" type="button">بحث المنتجات</button>
         <button class="tab" data-tab="catalog" type="button">منتجاتي</button>
         <button class="tab" data-tab="logs" type="button">سجلات الرفع</button>
-        <button class="tab" data-tab="settings" type="button">الإعدادات</button>
+        <button class="tab" data-tab="settings" type="button">إعدادات</button>
       </div>
 
       <section id="tab-search" class="panel">
-        <label for="query">ابحث عن منتجات</label>
-        <div class="row">
-          <input id="query" type="search" placeholder="مثال: phone case, earbuds, watch..." />
-          <button class="btn btn-accent" id="searchBtn" type="button" style="flex:0 0 auto">بحث</button>
+        <label for="query">كلمة البحث</label>
+        <div style="display:flex;gap:.6rem;flex-wrap:wrap">
+          <input id="query" type="search" placeholder="phone case, earbuds, led light..." style="flex:1 1 240px" />
+          <button class="btn btn-accent" id="searchBtn" type="button">بحث بالفلاتر</button>
         </div>
-        <p class="hint">اكتب كلمة بحث واضغط بحث، ثم اختر منتجًا لمعاينته ورفعه إلى Shopify.</p>
+
+        <div class="filters" id="filters">
+          <div>
+            <label for="sort">الترتيب</label>
+            <select id="sort">
+              <option value="orders" selected>الأكثر مبيعًا</option>
+              <option value="default">أفضل تطابق</option>
+              <option value="price_asc">السعر ↑</option>
+              <option value="price_desc">السعر ↓</option>
+              <option value="newest">الأحدث</option>
+            </select>
+          </div>
+          <div>
+            <label for="minPrice">أقل سعر</label>
+            <input id="minPrice" type="number" min="0" step="0.01" placeholder="1" />
+          </div>
+          <div>
+            <label for="maxPrice">أعلى سعر</label>
+            <input id="maxPrice" type="number" min="0" step="0.01" placeholder="50" />
+          </div>
+          <div>
+            <label for="currency">العملة</label>
+            <select id="currency">
+              <option value="USD" selected>USD</option>
+              <option value="SAR">SAR</option>
+              <option value="AED">AED</option>
+              <option value="EUR">EUR</option>
+              <option value="GBP">GBP</option>
+              <option value="EGP">EGP</option>
+            </select>
+          </div>
+          <div>
+            <label for="shipToCountry">بلد الشحن إلى</label>
+            <select id="shipToCountry">
+              <option value="SA" selected>السعودية SA</option>
+              <option value="AE">الإمارات AE</option>
+              <option value="EG">مصر EG</option>
+              <option value="US">أمريكا US</option>
+              <option value="GB">بريطانيا GB</option>
+              <option value="DE">ألمانيا DE</option>
+              <option value="FR">فرنسا FR</option>
+            </select>
+          </div>
+          <div>
+            <label for="shipFromCountry">الشحن من</label>
+            <select id="shipFromCountry">
+              <option value="">أي بلد</option>
+              <option value="CN">الصين CN</option>
+              <option value="SA">السعودية SA</option>
+              <option value="AE">الإمارات AE</option>
+              <option value="US">أمريكا US</option>
+              <option value="ES">إسبانيا ES</option>
+              <option value="PL">بولندا PL</option>
+            </select>
+          </div>
+          <div>
+            <label for="minSold">أقل مبيعات</label>
+            <input id="minSold" type="number" min="0" step="1" placeholder="500" />
+          </div>
+          <div>
+            <label for="maxSold">أعلى مبيعات</label>
+            <input id="maxSold" type="number" min="0" step="1" placeholder="" />
+          </div>
+          <div>
+            <label for="minRating">أقل تقييم ★</label>
+            <input id="minRating" type="number" min="0" max="5" step="0.1" placeholder="4.5" />
+          </div>
+          <div>
+            <label for="minReviews">أقل عدد تقييمات</label>
+            <input id="minReviews" type="number" min="0" step="1" placeholder="50" />
+          </div>
+          <div>
+            <label for="maxNegativeRate">أقصى % تقييمات سلبية</label>
+            <input id="maxNegativeRate" type="number" min="0" max="100" step="1" placeholder="20" />
+          </div>
+          <div>
+            <label for="minDiscountPercent">أقل خصم %</label>
+            <input id="minDiscountPercent" type="number" min="0" max="95" step="1" placeholder="30" />
+          </div>
+          <div>
+            <label for="targetSellingPrice">سعر بيع مستهدف</label>
+            <input id="targetSellingPrice" type="number" min="0" step="0.01" placeholder="29.99" />
+          </div>
+          <div>
+            <label for="minMarginPercent">أقل هامش ربح %</label>
+            <input id="minMarginPercent" type="number" min="0" max="95" step="1" placeholder="40" />
+          </div>
+          <div>
+            <label for="includeKeywords">كلمات يجب أن تظهر</label>
+            <input id="includeKeywords" placeholder="wireless, bluetooth" />
+          </div>
+          <div>
+            <label for="excludeKeywords">استبعاد كلمات</label>
+            <input id="excludeKeywords" placeholder="kids, wholesale lot" />
+          </div>
+
+          <label class="check"><input id="freeShipping" type="checkbox" /> شحن مجاني</label>
+          <label class="check"><input id="choiceOnly" type="checkbox" /> Choice فقط</label>
+          <label class="check"><input id="highRatedSellers" type="checkbox" /> بائعون بتقييم عالي</label>
+          <label class="check"><input id="unitPrice" type="checkbox" /> سعر الوحدة</label>
+          <label class="check"><input id="requireViralBadge" type="checkbox" /> منتجات فايرل / رائجة</label>
+          <label class="check"><input id="requireFreeShippingBadge" type="checkbox" /> شارة شحن مجاني</label>
+        </div>
+
+        <p class="hint">أكثر من 20 فلتر: سعر، مبيعات، تقييم، تقييمات سلبية تقديرية، بلد/عملة، Choice، فايرل، هامش ربح…</p>
         <div id="searchStatus" class="hint"></div>
         <div id="results" class="grid"></div>
       </section>
 
       <section id="tab-catalog" class="panel hidden">
-        <div class="row">
-          <input id="catalogQ" type="search" placeholder="فلترة بالعربية/الإنجليزية أو رقم المنتج..." />
-          <button class="btn btn-ghost" id="refreshCatalog" type="button" style="flex:0 0 auto">تحديث</button>
+        <div style="display:flex;gap:.6rem;flex-wrap:wrap">
+          <input id="catalogQ" type="search" placeholder="فلترة منتجاتي..." style="flex:1" />
+          <button class="btn btn-ghost" id="refreshCatalog" type="button">تحديث</button>
         </div>
         <div style="overflow:auto;margin-top:1rem">
           <table>
-            <thead>
-              <tr><th>المنتج</th><th>السعر</th><th>الحالة</th><th>AliExpress</th></tr>
-            </thead>
+            <thead><tr><th>المنتج</th><th>السعر</th><th>الحالة</th><th>AliExpress</th></tr></thead>
             <tbody id="catalogBody"></tbody>
           </table>
         </div>
@@ -209,42 +317,45 @@ export function renderDashboardPage(storeDomain: string): string {
         <button class="btn btn-ghost" id="refreshLogs" type="button">تحديث السجلات</button>
         <div style="overflow:auto;margin-top:1rem">
           <table>
-            <thead>
-              <tr><th>الوقت</th><th>الإجراء</th><th>الحالة</th><th>التفاصيل</th></tr>
-            </thead>
+            <thead><tr><th>الوقت</th><th>الإجراء</th><th>الحالة</th><th>التفاصيل</th></tr></thead>
             <tbody id="logsBody"></tbody>
           </table>
         </div>
       </section>
 
       <section id="tab-settings" class="panel hidden">
-        <p class="hint">المتجر المرتبط: <strong>${store}</strong></p>
-        <button class="btn btn-ghost" id="logoutBtn" type="button">مسح المفتاح والخروج</button>
+        <p class="hint">المتجر: <strong>${store}</strong></p>
+        <p class="hint">لتغيير الرقم السري عيّن Secret اسمه <code>DASHBOARD_PIN</code> في Cloudflare.</p>
+        <button class="btn btn-ghost" id="logoutBtn" type="button">خروج</button>
       </section>
     </section>
   </div>
 
   <div class="drawer-backdrop" id="backdrop"></div>
-  <aside class="drawer" id="drawer" aria-live="polite">
+  <aside class="drawer" id="drawer">
     <button class="btn btn-ghost" id="closeDrawer" type="button">إغلاق</button>
     <img id="dImg" alt="" />
     <h2 id="dTitle"></h2>
     <div class="price" id="dPrice"></div>
-    <div class="sub" id="dMeta"></div>
+    <div class="stats">
+      <div class="stat"><b>المبيعات</b><span id="dSold">—</span></div>
+      <div class="stat"><b>التقييم</b><span id="dRating">—</span></div>
+      <div class="stat"><b>عدد التقييمات</b><span id="dReviews">—</span></div>
+      <div class="stat"><b>% سلبية تقديري</b><span id="dNeg">—</span></div>
+    </div>
+    <div class="badges" id="dBadges"></div>
     <label for="dSell" style="margin-top:1rem">سعر البيع (اختياري)</label>
-    <input id="dSell" type="number" min="0" step="0.01" placeholder="اتركه فارغًا لاستخدام الهامش التلقائي" />
-    <div class="row" style="margin-top:.8rem">
+    <input id="dSell" type="number" min="0" step="0.01" placeholder="اتركه فارغًا للهامش التلقائي" />
+    <div style="display:flex;gap:.55rem;flex-wrap:wrap;margin-top:.8rem">
       <button class="btn btn-accent" id="importBtn" type="button">رفع إلى Shopify</button>
-      <a class="btn btn-ghost" id="openAe" href="#" target="_blank" rel="noopener" style="text-align:center;text-decoration:none">فتح في علي إكسبريس</a>
+      <a class="btn btn-ghost" id="openAe" href="#" target="_blank" rel="noopener" style="text-decoration:none;text-align:center">فتح علي إكسبريس</a>
     </div>
     <p class="hint" id="dHint"></p>
   </aside>
-
   <div class="toast" id="toast"></div>
 
   <script>
-    const KEY = "shixato_api_key";
-    const state = { listing: null, results: [] };
+    const state = { listing: null };
 
     const $ = (id) => document.getElementById(id);
     const toast = (msg, err=false) => {
@@ -255,47 +366,48 @@ export function renderDashboardPage(storeDomain: string): string {
       setTimeout(() => el.classList.remove("show"), 3200);
     };
 
-    function getKey() { return localStorage.getItem(KEY) || ""; }
-    function setKey(v) { localStorage.setItem(KEY, v); }
-
     async function api(path, options = {}) {
-      const headers = Object.assign({ "Content-Type": "application/json" }, options.headers || {});
-      headers.Authorization = "Bearer " + getKey();
-      const res = await fetch(path, { ...options, headers });
+      const res = await fetch(path, {
+        credentials: "include",
+        headers: { "Content-Type": "application/json", ...(options.headers || {}) },
+        ...options,
+      });
       const body = await res.json().catch(() => ({}));
-      if (!res.ok || body.ok === false) {
-        throw new Error(body.error || ("HTTP " + res.status));
-      }
+      if (!res.ok || body.ok === false) throw new Error(body.error || ("HTTP " + res.status));
       return body;
     }
 
-    function showApp(show) {
-      $("gate").classList.toggle("hidden", show);
-      $("app").classList.toggle("hidden", !show);
+    function showApp(on) {
+      $("gate").classList.toggle("hidden", on);
+      $("app").classList.toggle("hidden", !on);
     }
 
     async function boot() {
-      if (!getKey()) { showApp(false); return; }
-      $("apiKey").value = getKey();
       try {
-        await api("/api/products?limit=1");
-        showApp(true);
-      } catch (e) {
-        showApp(false);
-        toast("المفتاح غير صحيح أو الـ Worker غير جاهز", true);
-      }
+        const me = await api("/api/auth/me");
+        if (me.data && me.data.authenticated) {
+          showApp(true);
+          return;
+        }
+      } catch (_) {}
+      showApp(false);
     }
 
-    $("saveKeyBtn").onclick = async () => {
-      const v = $("apiKey").value.trim();
-      if (!v) return toast("أدخل API_KEY", true);
-      setKey(v);
-      await boot();
-      if (!$("app").classList.contains("hidden")) toast("تم الدخول");
-    };
-
-    $("logoutBtn").onclick = () => {
-      localStorage.removeItem(KEY);
+    async function login() {
+      const pin = $("pin").value.trim();
+      if (!pin) return toast("اكتب الرقم السري", true);
+      try {
+        await api("/api/auth/login", { method: "POST", body: JSON.stringify({ pin }) });
+        showApp(true);
+        toast("تم الدخول — ابحث عن منتجاتك");
+      } catch (e) {
+        toast(e.message || "فشل الدخول", true);
+      }
+    }
+    $("loginBtn").onclick = login;
+    $("pin").addEventListener("keydown", (e) => { if (e.key === "Enter") login(); });
+    $("logoutBtn").onclick = async () => {
+      await api("/api/auth/logout", { method: "POST", body: "{}" });
       location.reload();
     };
 
@@ -311,10 +423,56 @@ export function renderDashboardPage(storeDomain: string): string {
       });
     });
 
+    function num(id) {
+      const v = $(id).value;
+      if (v === "" || v == null) return undefined;
+      const n = Number(v);
+      return Number.isFinite(n) ? n : undefined;
+    }
+
+    function collectFilters() {
+      return {
+        query: $("query").value.trim(),
+        page: 1,
+        sort: $("sort").value,
+        minPrice: num("minPrice"),
+        maxPrice: num("maxPrice"),
+        currency: $("currency").value,
+        shipToCountry: $("shipToCountry").value,
+        shipFromCountry: $("shipFromCountry").value || undefined,
+        freeShipping: $("freeShipping").checked,
+        choiceOnly: $("choiceOnly").checked,
+        highRatedSellers: $("highRatedSellers").checked,
+        unitPrice: $("unitPrice").checked,
+        minSold: num("minSold"),
+        maxSold: num("maxSold"),
+        minRating: num("minRating"),
+        minReviews: num("minReviews"),
+        maxNegativeRate: num("maxNegativeRate"),
+        minDiscountPercent: num("minDiscountPercent"),
+        requireViralBadge: $("requireViralBadge").checked,
+        requireFreeShippingBadge: $("requireFreeShippingBadge").checked,
+        includeKeywords: $("includeKeywords").value.trim() || undefined,
+        excludeKeywords: $("excludeKeywords").value.trim() || undefined,
+        targetSellingPrice: num("targetSellingPrice"),
+        minMarginPercent: num("minMarginPercent"),
+      };
+    }
+
     function money(n, c="USD") {
-      const num = Number(n);
-      if (!Number.isFinite(num)) return "—";
-      return new Intl.NumberFormat("en-US", { style: "currency", currency: c || "USD" }).format(num);
+      const numv = Number(n);
+      if (!Number.isFinite(numv)) return "—";
+      try {
+        return new Intl.NumberFormat("en-US", { style: "currency", currency: c || "USD" }).format(numv);
+      } catch {
+        return numv + " " + c;
+      }
+    }
+
+    function escapeHtml(s) {
+      return String(s || "")
+        .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
     }
 
     function renderResults(items) {
@@ -323,43 +481,44 @@ export function renderDashboardPage(storeDomain: string): string {
       items.forEach((item, idx) => {
         const el = document.createElement("article");
         el.className = "product";
-        el.style.animationDelay = (idx * 0.03) + "s";
-        el.innerHTML = \`
-          <img src="\${item.image || ''}" alt="" loading="lazy" />
-          <div class="meta">
-            <h3>\${escapeHtml(item.title)}</h3>
-            <div class="price">\${money(item.originalPrice, item.currency)}</div>
-            <div class="sub">\${escapeHtml(item.sold || '')} \${item.rating ? "★ " + item.rating : ""}</div>
-          </div>\`;
+        el.style.animationDelay = (idx * 0.025) + "s";
+        const badgeHtml = (item.badges || []).slice(0, 3).map((b) =>
+          '<span class="badge">' + escapeHtml(b) + "</span>"
+        ).join("");
+        el.innerHTML =
+          '<img src="' + escapeHtml(item.image || "") + '" alt="" loading="lazy" />' +
+          '<div class="meta">' +
+          "<h3>" + escapeHtml(item.title) + "</h3>" +
+          '<div class="price">' + money(item.originalPrice, item.currency) + "</div>" +
+          '<div class="sub">' +
+            escapeHtml(item.sold || (item.soldCount != null ? (item.soldCount + " sold") : "")) +
+            (item.rating != null ? (" · ★ " + item.rating) : "") +
+            (item.negativeRateEstimate != null ? (" · سلبي≈" + item.negativeRateEstimate + "%") : "") +
+          "</div>" +
+          '<div class="badges">' + badgeHtml + "</div>" +
+          "</div>";
         el.onclick = () => openDrawer(item);
         root.appendChild(el);
       });
     }
 
-    function escapeHtml(s) {
-      return String(s || "")
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;")
-        .replace(/"/g, "&quot;")
-        .replace(/'/g, "&#39;");
-    }
-
     async function runSearch() {
-      const query = $("query").value.trim();
-      if (query.length < 2) return toast("اكتب كلمة بحث أطول", true);
+      const filters = collectFilters();
+      if (!filters.query || filters.query.length < 2) return toast("اكتب كلمة بحث", true);
       $("searchBtn").disabled = true;
-      $("searchStatus").textContent = "جاري البحث في علي إكسبريس...";
+      $("searchStatus").textContent = "جاري البحث وتصفية النتائج...";
       try {
         const res = await api("/api/products/search", {
           method: "POST",
-          body: JSON.stringify({ query, page: 1 }),
+          body: JSON.stringify(filters),
         });
-        state.results = res.data.results || [];
-        $("searchStatus").textContent = state.results.length
-          ? ("عثرنا على " + state.results.length + " منتجًا")
-          : "لا نتائج — جرّب كلمات إنجليزية أوضح";
-        renderResults(state.results);
+        const data = res.data || {};
+        const items = data.results || [];
+        $("searchStatus").textContent =
+          "نتائج: " + (data.totalAfterFilter ?? items.length) +
+          " بعد الفلتر / " + (data.totalParsed ?? items.length) + " قبل الفلتر المحلي";
+        renderResults(items);
+        if (!items.length) toast("لا نتائج مطابقة — خفّف الفلاتر", true);
       } catch (e) {
         $("searchStatus").textContent = "";
         toast(e.message || "فشل البحث", true);
@@ -367,25 +526,29 @@ export function renderDashboardPage(storeDomain: string): string {
         $("searchBtn").disabled = false;
       }
     }
-
     $("searchBtn").onclick = runSearch;
-    $("query").addEventListener("keydown", (e) => {
-      if (e.key === "Enter") runSearch();
-    });
+    $("query").addEventListener("keydown", (e) => { if (e.key === "Enter") runSearch(); });
 
     function openDrawer(item) {
       state.listing = item;
       $("dImg").src = item.image || "";
       $("dTitle").textContent = item.title;
-      $("dPrice").textContent = money(item.originalPrice, item.currency);
-      $("dMeta").textContent = (item.sold || "") + (item.rating ? " · ★ " + item.rating : "") + " · #" + item.aliexpressId;
+      $("dPrice").textContent = money(item.originalPrice, item.currency) +
+        (item.listPrice ? (" · كان " + money(item.listPrice, item.currency)) : "") +
+        (item.discountPercent != null ? (" · خصم " + item.discountPercent + "%") : "");
+      $("dSold").textContent = item.sold || (item.soldCount != null ? String(item.soldCount) : "—");
+      $("dRating").textContent = item.rating != null ? ("★ " + item.rating) : "—";
+      $("dReviews").textContent = item.reviewCount != null ? String(item.reviewCount) : "—";
+      $("dNeg").textContent = item.negativeRateEstimate != null ? (item.negativeRateEstimate + "%") : "—";
+      $("dBadges").innerHTML = (item.badges || []).map((b) =>
+        '<span class="badge">' + escapeHtml(b) + "</span>"
+      ).join("");
       $("dSell").value = "";
       $("openAe").href = item.url || ("https://www.aliexpress.com/item/" + item.aliexpressId + ".html");
-      $("dHint").textContent = "الرفع يستخدم بيانات بطاقة البحث (موثوق أكثر من صفحة المنتج المحجوبة).";
+      $("dHint").textContent = "الرفع يستخدم بيانات بطاقة البحث + فلاترك. ID: " + item.aliexpressId;
       $("drawer").classList.add("open");
       $("backdrop").classList.add("open");
     }
-
     function closeDrawer() {
       $("drawer").classList.remove("open");
       $("backdrop").classList.remove("open");
@@ -408,8 +571,7 @@ export function renderDashboardPage(storeDomain: string): string {
             listing: state.listing,
           }),
         });
-        const synced = res.data && res.data.synced;
-        toast(synced ? "تم الرفع إلى Shopify بنجاح" : "تم الحفظ لكن لم يُرفع (فلتر/خطأ)");
+        toast(res.data && res.data.synced ? "تم الرفع إلى Shopify" : "تم الحفظ بدون مزامنة كاملة");
         closeDrawer();
       } catch (e) {
         toast(e.message || "فشل الرفع", true);
@@ -426,20 +588,21 @@ export function renderDashboardPage(storeDomain: string): string {
         body.innerHTML = "";
         (res.data || []).forEach((p) => {
           const tr = document.createElement("tr");
-          const img = (p.images && p.images[0]) ? \`<img src="\${p.images[0]}" alt="" style="width:42px;height:42px;object-fit:cover;border-radius:8px;vertical-align:middle;margin-inline-end:8px" />\` : "";
-          tr.innerHTML = \`
-            <td>\${img}<strong>\${escapeHtml(p.title)}</strong></td>
-            <td>\${money(p.selling_price)}</td>
-            <td><span class="status \${p.status}">\${p.status}</span></td>
-            <td><a href="https://www.aliexpress.com/item/\${p.aliexpress_id}.html" target="_blank" rel="noopener">\${p.aliexpress_id}</a></td>\`;
+          const img = (p.images && p.images[0])
+            ? '<img src="' + escapeHtml(p.images[0]) + '" alt="" style="width:42px;height:42px;object-fit:cover;border-radius:8px;vertical-align:middle;margin-inline-end:8px" />'
+            : "";
+          tr.innerHTML =
+            "<td>" + img + "<strong>" + escapeHtml(p.title) + "</strong></td>" +
+            "<td>" + money(p.selling_price) + "</td>" +
+            '<td><span class="status ' + escapeHtml(p.status) + '">' + escapeHtml(p.status) + "</span></td>" +
+            '<td><a href="https://www.aliexpress.com/item/' + p.aliexpress_id + '.html" target="_blank" rel="noopener">' +
+            p.aliexpress_id + "</a></td>";
           body.appendChild(tr);
         });
         if (!(res.data || []).length) {
-          body.innerHTML = '<tr><td colspan="4" class="hint">لا منتجات بعد — ابحث وارفع من تبويب البحث.</td></tr>';
+          body.innerHTML = '<tr><td colspan="4" class="hint">لا منتجات بعد.</td></tr>';
         }
-      } catch (e) {
-        toast(e.message || "فشل تحميل المنتجات", true);
-      }
+      } catch (e) { toast(e.message || "فشل التحميل", true); }
     }
     $("refreshCatalog").onclick = loadCatalog;
     $("catalogQ").addEventListener("keydown", (e) => { if (e.key === "Enter") loadCatalog(); });
@@ -451,19 +614,17 @@ export function renderDashboardPage(storeDomain: string): string {
         body.innerHTML = "";
         (res.data || []).forEach((l) => {
           const tr = document.createElement("tr");
-          tr.innerHTML = \`
-            <td>\${new Date(l.created_at).toLocaleString()}</td>
-            <td>\${escapeHtml(l.action)}</td>
-            <td><span class="status \${l.status}">\${l.status}</span></td>
-            <td>\${escapeHtml(l.error_message || l.aliexpress_id || "")}</td>\`;
+          tr.innerHTML =
+            "<td>" + new Date(l.created_at).toLocaleString() + "</td>" +
+            "<td>" + escapeHtml(l.action) + "</td>" +
+            '<td><span class="status ' + escapeHtml(l.status) + '">' + escapeHtml(l.status) + "</span></td>" +
+            "<td>" + escapeHtml(l.error_message || l.aliexpress_id || "") + "</td>";
           body.appendChild(tr);
         });
         if (!(res.data || []).length) {
           body.innerHTML = '<tr><td colspan="4" class="hint">لا سجلات بعد.</td></tr>';
         }
-      } catch (e) {
-        toast(e.message || "فشل تحميل السجلات", true);
-      }
+      } catch (e) { toast(e.message || "فشل التحميل", true); }
     }
     $("refreshLogs").onclick = loadLogs;
 

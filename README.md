@@ -91,12 +91,14 @@ Worker name in config is `shixato` (must match the Cloudflare project name).
 
 ## Dashboard
 
-Open **`/dashboard`** on the Worker (browsers hitting `/` redirect there).
+Open **`/dashboard`** (browsers hitting `/` redirect there).
 
-1. Paste your Cloudflare `API_KEY`
-2. Search AliExpress by keyword
+1. Enter PIN **`1111`** (override with `DASHBOARD_PIN` secret/var)
+2. Search AliExpress with rich filters (price, sold, rating, country, currency, Choice, viral, margin…)
 3. Open a product → set selling price (optional) → **رفع إلى Shopify**
 4. Review **منتجاتي** and **سجلات الرفع**
+
+Programmatic API access still uses `Authorization: Bearer <API_KEY>`.
 
 ## API
 

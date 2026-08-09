@@ -3,7 +3,9 @@ import type {
   AliExpressProduct,
   AliExpressSearchResult,
   AliExpressVariant,
+  ProductSearchFilters,
 } from "../types";
+import { SEARCH_SORT_MAP } from "../types/search";
 import { extractAliExpressId, fetchWithTimeout, HttpError } from "../utils/http";
 
 /**
@@ -16,8 +18,8 @@ export class AliExpressService {
     return `https://www.aliexpress.com/item/${aliexpressId}.html`;
   }
 
-  buildSearchUrl(query: string, page = 1): string {
-    const slug = query
+  buildSearchUrl(filters: ProductSearchFilters): string {
+    const slug = filters.query
       .trim()
       .toLowerCase()
       .replace(/[^a-z0-9\s-]/g, " ")
@@ -26,22 +28,68 @@ export class AliExpressService {
       .replace(/^-|-$/g, "");
     const safe = slug || "product";
     const params = new URLSearchParams();
+    const page = filters.page && filters.page > 1 ? filters.page : 1;
     if (page > 1) params.set("page", String(page));
+
+    const sort = SEARCH_SORT_MAP[filters.sort ?? "orders"];
+    if (sort) params.set("SortType", sort);
+
+    if (filters.minPrice != null && filters.minPrice >= 0) {
+      params.set("minPrice", String(filters.minPrice));
+    }
+    if (filters.maxPrice != null && filters.maxPrice > 0) {
+      params.set("maxPrice", String(filters.maxPrice));
+    }
+    if (filters.shipFromCountry) {
+      params.set("shipFromCountry", filters.shipFromCountry.toUpperCase());
+    }
+    if (filters.shipToCountry) {
+      params.set("shipCountry", filters.shipToCountry.toUpperCase());
+    }
+    if (filters.freeShipping) params.set("isFreeShip", "y");
+    if (filters.choiceOnly) params.set("g", "y");
+    if (filters.highRatedSellers) params.set("isFavorite", "y");
+    if (filters.unitPrice) params.set("isUnitPrice", "y");
+
     const qs = params.toString();
-    return `https://www.aliexpress.com/w/wholesale-${encodeURIComponent(safe)}.html${qs ? `?${qs}` : ""}`;
+    return `https://www.aliexpress.com/w/wholesale-${safe}.html${qs ? `?${qs}` : ""}`;
   }
 
-  async search(query: string, page = 1): Promise<AliExpressSearchResult> {
-    const q = query.trim();
+  async search(filters: ProductSearchFilters): Promise<AliExpressSearchResult> {
+    const q = filters.query.trim();
     if (q.length < 2) {
       throw new HttpError(400, "Search query must be at least 2 characters");
     }
 
-    const url = this.buildSearchUrl(q, page);
-    const html = await this.fetchHtml(url, { allowShort: false });
-    const results = this.parseSearchResults(html);
+    const normalized: ProductSearchFilters = {
+      ...filters,
+      query: q,
+      page: filters.page && filters.page > 0 ? filters.page : 1,
+      sort: filters.sort ?? "orders",
+      currency: (filters.currency || "USD").toUpperCase(),
+      shipToCountry: (filters.shipToCountry || "SA").toUpperCase(),
+    };
 
-    return { query: q, page, results };
+    const url = this.buildSearchUrl(normalized);
+    const cookie = this.buildLocaleCookie(
+      normalized.currency!,
+      normalized.shipToCountry!,
+    );
+    const html = await this.fetchHtml(url, {
+      allowShort: false,
+      cookie,
+    });
+    const parsed = this.parseSearchResults(html);
+    const results = this.applyClientFilters(parsed, normalized);
+
+    return {
+      query: q,
+      page: normalized.page!,
+      filtersApplied: { ...normalized },
+      results,
+      totalParsed: parsed.length,
+      totalAfterFilter: results.length,
+    };
   }
 
   fromListing(listing: AliExpressListing): AliExpressProduct {
@@ -86,7 +134,16 @@ export class AliExpressService {
       ],
       attributes: {
         ...(listing.sold ? { sold: listing.sold } : {}),
+        ...(listing.soldCount != null
+          ? { soldCount: String(listing.soldCount) }
+          : {}),
         ...(listing.rating != null ? { rating: String(listing.rating) } : {}),
+        ...(listing.reviewCount != null
+          ? { reviewCount: String(listing.reviewCount) }
+          : {}),
+        ...(listing.badges?.length
+          ? { badges: listing.badges.join(",") }
+          : {}),
         source: "search_listing",
       },
       scrapedAt: new Date().toISOString(),
@@ -122,22 +179,30 @@ export class AliExpressService {
     return this.normalize(aliexpressId, url, raw, html);
   }
 
+  private buildLocaleCookie(currency: string, shipToCountry: string): string {
+    // Guides AliExpress SSR toward currency + destination region
+    return `aep_usuc_f=site=glo&c_tp=${encodeURIComponent(currency)}&region=${encodeURIComponent(shipToCountry)}&b_locale=en_US`;
+  }
+
   private async fetchHtml(
     url: string,
-    options?: { allowShort?: boolean },
+    options?: { allowShort?: boolean; cookie?: string },
   ): Promise<string> {
+    const headers: Record<string, string> = {
+      "User-Agent":
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+      Accept:
+        "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+      "Accept-Language": "en-US,en;q=0.9,ar;q=0.8",
+      "Cache-Control": "no-cache",
+      "Upgrade-Insecure-Requests": "1",
+    };
+    if (options?.cookie) headers.Cookie = options.cookie;
+
     const res = await fetchWithTimeout(
       url,
       {
-        headers: {
-          "User-Agent":
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-          Accept:
-            "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-          "Accept-Language": "en-US,en;q=0.9",
-          "Cache-Control": "no-cache",
-          "Upgrade-Insecure-Requests": "1",
-        },
+        headers,
         redirect: "follow",
       },
       25_000,
@@ -212,17 +277,20 @@ export class AliExpressService {
     const originalPriceObj = prices?.originalPrice as
       | Record<string, unknown>
       | undefined;
+    const extra = item.extraParams as Record<string, unknown> | undefined;
 
-    let originalPrice = Number(salePrice?.minPrice ?? NaN);
-    if (!Number.isFinite(originalPrice) || originalPrice <= 0) {
-      originalPrice = Number(originalPriceObj?.minPrice ?? NaN);
-    }
-    if (!Number.isFinite(originalPrice) || originalPrice <= 0) {
-      const extra = item.extraParams as Record<string, unknown> | undefined;
+    let sale = Number(salePrice?.minPrice ?? NaN);
+    if (!Number.isFinite(sale) || sale <= 0) {
       const cents = Number(extra?.salePriceAmount ?? NaN);
-      if (Number.isFinite(cents) && cents > 0) originalPrice = cents / 100;
+      if (Number.isFinite(cents) && cents > 0) sale = cents / 100;
     }
-    if (!Number.isFinite(originalPrice) || originalPrice < 0) originalPrice = 0;
+    if (!Number.isFinite(sale) || sale < 0) sale = 0;
+
+    let listPrice = Number(originalPriceObj?.minPrice ?? NaN);
+    if (!Number.isFinite(listPrice) || listPrice <= 0) {
+      const cents = Number(extra?.originPriceAmount ?? NaN);
+      if (Number.isFinite(cents) && cents > 0) listPrice = cents / 100;
+    }
 
     const currency =
       this.asString(salePrice?.currencyCode) ||
@@ -231,10 +299,49 @@ export class AliExpressService {
 
     const trade = item.trade as Record<string, unknown> | undefined;
     const evaluation = item.evaluation as Record<string, unknown> | undefined;
+    const soldText = this.asString(trade?.tradeDesc) || undefined;
+    const soldCount = this.parseSoldCount(
+      trade?.realTradeCount ?? trade?.tradeDesc,
+    );
+
+    const rating =
+      typeof evaluation?.starRating === "number"
+        ? evaluation.starRating
+        : Number(evaluation?.starRating ?? NaN);
+    const reviewCount = this.parseReviewCount(evaluation);
+
+    const discountPercent =
+      Number.isFinite(listPrice) &&
+      listPrice > 0 &&
+      sale > 0 &&
+      listPrice > sale
+        ? Math.round(((listPrice - sale) / listPrice) * 100)
+        : typeof salePrice?.discount === "number"
+          ? salePrice.discount
+          : undefined;
+
+    const badges = this.extractBadges(item);
+    const isChoice = badges.some((b) => /choice/i.test(b));
+    const isFreeShipping = badges.some((b) => /free\s*shipping/i.test(b));
+    const isViral =
+      badges.some((b) => /viral|trending|hot|bestseller|top/i.test(b)) ||
+      (soldCount != null && soldCount >= 1000);
+
+    // Card pages rarely expose explicit negative counts — estimate from stars.
+    const negativeRateEstimate =
+      Number.isFinite(rating) && rating > 0
+        ? Math.max(0, Math.min(100, Math.round((1 - rating / 5) * 100)))
+        : undefined;
+
     const detailUrl = this.asString(item.productDetailUrl);
     const url = detailUrl.startsWith("//")
       ? `https:${detailUrl}`
       : detailUrl || this.buildProductUrl(aliexpressId);
+
+    const shipFrom =
+      this.asString(extra?.shipFrom) ||
+      this.asString(extra?.ship_from) ||
+      undefined;
 
     return {
       aliexpressId,
@@ -242,14 +349,144 @@ export class AliExpressService {
       url,
       image,
       images: image ? [image] : [],
-      originalPrice,
+      originalPrice: sale,
+      listPrice: Number.isFinite(listPrice) && listPrice > 0 ? listPrice : undefined,
       currency,
-      sold: this.asString(trade?.tradeDesc) || undefined,
-      rating:
-        typeof evaluation?.starRating === "number"
-          ? evaluation.starRating
-          : undefined,
+      sold: soldText,
+      soldCount,
+      rating: Number.isFinite(rating) ? rating : undefined,
+      reviewCount,
+      negativeRateEstimate,
+      discountPercent,
+      badges,
+      isChoice,
+      isFreeShipping,
+      isViral,
+      shipFrom,
     };
+  }
+
+  private extractBadges(item: Record<string, unknown>): string[] {
+    const out: string[] = [];
+    const points =
+      (item.sellingPoints as Array<Record<string, unknown>> | undefined) ?? [];
+    for (const sp of points) {
+      const tc = (sp.tagContent as Record<string, unknown> | undefined) ?? {};
+      const text =
+        this.asString(tc.tagText) ||
+        this.asString(tc.displayTagType) ||
+        this.asString(sp.sellingPointTagId);
+      if (text) out.push(text);
+    }
+    const rainbow = item.rainbow as Record<string, unknown> | undefined;
+    if (rainbow?.title) out.push(this.asString(rainbow.title));
+    return [...new Set(out)].slice(0, 12);
+  }
+
+  private parseSoldCount(value: unknown): number | undefined {
+    if (typeof value === "number" && Number.isFinite(value)) return value;
+    if (typeof value !== "string") return undefined;
+    const cleaned = value.replace(/,/g, "").trim();
+    const m = cleaned.match(/([\d.]+)\s*([kKmM])?/);
+    if (!m) return undefined;
+    let n = Number(m[1]);
+    if (!Number.isFinite(n)) return undefined;
+    const suffix = (m[2] || "").toLowerCase();
+    if (suffix === "k") n *= 1_000;
+    if (suffix === "m") n *= 1_000_000;
+    return Math.round(n);
+  }
+
+  private parseReviewCount(
+    evaluation: Record<string, unknown> | undefined,
+  ): number | undefined {
+    if (!evaluation) return undefined;
+    for (const key of [
+      "localeEvalCnt",
+      "evalCnt",
+      "evalCount",
+      "totalValidNum",
+      "reviewCount",
+    ]) {
+      const n = Number(evaluation[key]);
+      if (Number.isFinite(n) && n >= 0) return n;
+      if (typeof evaluation[key] === "string") {
+        const parsed = this.parseSoldCount(evaluation[key]);
+        if (parsed != null) return parsed;
+      }
+    }
+    return undefined;
+  }
+
+  private applyClientFilters(
+    items: AliExpressListing[],
+    filters: ProductSearchFilters,
+  ): AliExpressListing[] {
+    const exclude = this.splitKeywords(filters.excludeKeywords);
+    const include = this.splitKeywords(filters.includeKeywords);
+
+    return items.filter((item) => {
+      if (filters.minSold != null && (item.soldCount ?? 0) < filters.minSold) {
+        return false;
+      }
+      if (filters.maxSold != null && (item.soldCount ?? 0) > filters.maxSold) {
+        return false;
+      }
+      if (filters.minRating != null && (item.rating ?? 0) < filters.minRating) {
+        return false;
+      }
+      if (
+        filters.minReviews != null &&
+        (item.reviewCount ?? 0) < filters.minReviews
+      ) {
+        return false;
+      }
+      if (
+        filters.maxNegativeRate != null &&
+        (item.negativeRateEstimate ?? 100) > filters.maxNegativeRate
+      ) {
+        return false;
+      }
+      if (
+        filters.minDiscountPercent != null &&
+        (item.discountPercent ?? 0) < filters.minDiscountPercent
+      ) {
+        return false;
+      }
+      if (filters.requireViralBadge && !item.isViral) return false;
+      if (filters.requireFreeShippingBadge && !item.isFreeShipping) {
+        return false;
+      }
+      if (filters.choiceOnly && !item.isChoice) return false;
+
+      const title = item.title.toLowerCase();
+      if (exclude.some((k) => title.includes(k))) return false;
+      if (include.length && !include.some((k) => title.includes(k))) {
+        return false;
+      }
+
+      if (
+        filters.targetSellingPrice != null &&
+        filters.minMarginPercent != null &&
+        item.originalPrice > 0
+      ) {
+        const margin =
+          ((filters.targetSellingPrice - item.originalPrice) /
+            filters.targetSellingPrice) *
+          100;
+        if (margin < filters.minMarginPercent) return false;
+      }
+
+      return true;
+    });
+  }
+
+  private splitKeywords(value?: string): string[] {
+    if (!value?.trim()) return [];
+    return value
+      .split(/[,|\n]/)
+      .map((s) => s.trim().toLowerCase())
+      .filter(Boolean);
   }
 
   private parseSearchResultsFallback(html: string): AliExpressListing[] {

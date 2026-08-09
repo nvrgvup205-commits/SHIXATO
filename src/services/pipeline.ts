@@ -4,6 +4,7 @@ import type {
   Env,
   ImportProductInput,
   ImportProductResult,
+  ProductSearchFilters,
 } from "../types";
 import { applyMarkup, clampImages, extractAliExpressId, HttpError } from "../utils/http";
 import { AiFilterService } from "./ai-filter";
@@ -31,8 +32,10 @@ export class ImportPipeline {
     this.maxImages = Number(env.MAX_PRODUCT_IMAGES ?? "8") || 8;
   }
 
-  async searchProducts(query: string, page = 1): Promise<AliExpressSearchResult> {
-    return this.aliexpress.search(query, page);
+  async searchProducts(
+    filters: ProductSearchFilters,
+  ): Promise<AliExpressSearchResult> {
+    return this.aliexpress.search(filters);
   }
 
   private async resolveProduct(input: ImportProductInput): Promise<AliExpressProduct> {

@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { logger } from "hono/logger";
 import { renderDashboardPage } from "./dashboard/page";
+import auth from "./routes/auth";
 import products from "./routes/products";
 import sync from "./routes/sync";
 import type { Env } from "./types";
@@ -13,13 +14,13 @@ app.use("*", logger());
 app.use(
   "*",
   cors({
-    origin: "*",
+    origin: (origin) => origin || "*",
     allowMethods: ["GET", "POST", "OPTIONS"],
     allowHeaders: ["Content-Type", "Authorization", "X-API-Key"],
+    credentials: true,
   }),
 );
 
-/** Browser → dashboard; API clients → JSON service descriptor */
 app.get("/", (c) => {
   const accept = c.req.header("Accept") ?? "";
   if (accept.includes("text/html")) {
@@ -32,6 +33,7 @@ app.get("/", (c) => {
     dashboard: "/dashboard",
     endpoints: {
       health: "GET /health",
+      login: "POST /api/auth/login",
       search: "POST /api/products/search",
       preview: "POST /api/products/preview",
       import: "POST /api/products/import",
@@ -54,6 +56,7 @@ app.get("/health", (c) =>
   }),
 );
 
+app.route("/api/auth", auth);
 app.route("/api/products", products);
 app.route("/api/sync", sync);
 
