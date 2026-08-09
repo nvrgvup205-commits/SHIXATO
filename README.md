@@ -14,11 +14,14 @@ src/
     aliexpress.ts          # HTML / embedded JSON extractor
     ai-filter.ts           # LLM or heuristic gate
     shopify.ts             # Admin GraphQL (create / variants / media)
-    supabase.ts            # Persistence + sync logs
+    supabase.ts            # Persistence on schema `shixato`
     pipeline.ts            # End-to-end orchestration
   types/index.ts
   utils/
-schema.sql                 # Supabase tables + indexes + RLS
+supabase/
+  config.toml              # Local Supabase; exposes schema `shixato`
+  migrations/              # Source of truth for DB
+schema.sql                 # SQL Editor bootstrap (same as migration)
 wrangler.toml              # Worker config (no secrets)
 .env.example               # Local secret template → copy to .dev.vars
 ```
@@ -26,8 +29,36 @@ wrangler.toml              # Worker config (no secrets)
 ## Prerequisites
 
 1. Cloudflare account + API token (`CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID` for CI)
-2. Supabase project — run `schema.sql` in the SQL editor
+2. Supabase project with independent schema `shixato` (steps below)
 3. Shopify custom app Admin API token (write products)
+
+## Supabase — independent schema (`shixato`)
+
+الجداول **ليست** في `public`. كلها تحت `shixato.products` و `shixato.sync_logs`.
+
+### أ) تطبيق الـ SQL (مرة واحدة)
+
+**خيار 1 — SQL Editor (الأسرع):**
+1. Supabase Dashboard → **SQL Editor** → New query
+2. الصق محتوى `schema.sql` كاملًا → **Run**
+3. Settings → **API** → **Exposed schemas** → أضف `shixato` → Save
+
+**خيار 2 — CLI من نفس المشروع:**
+```bash
+npx supabase login
+npx supabase link --project-ref <YOUR_PROJECT_REF>
+npm run db:push
+```
+ثم نفس خطوة Exposed schemas: أضف `shixato`.
+
+### ب) تحقق
+في SQL Editor:
+```sql
+SELECT table_schema, table_name
+FROM information_schema.tables
+WHERE table_schema = 'shixato';
+```
+يجب أن ترى `products` و `sync_logs`.
 
 ## Setup
 
@@ -36,7 +67,7 @@ npm install
 cp .env.example .dev.vars
 # edit .dev.vars with real values
 
-# Apply schema.sql in Supabase, then:
+# Apply shixato schema (above), then:
 npm run dev
 ```
 

@@ -1,7 +1,3 @@
--- SHIXATO bootstrap for Supabase SQL Editor (independent schema: shixato)
--- Source of truth for CLI: supabase/migrations/20260809170521_create_shixato_schema.sql
--- After run: Dashboard → Settings → API → Exposed schemas → add "shixato"
-
 -- Independent Postgres schema for SHIXATO automation (not public)
 -- Tables live in: shixato.products / shixato.sync_logs
 
