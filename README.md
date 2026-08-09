@@ -42,7 +42,9 @@ npm run dev
 
 ### Production secrets
 
-Never commit tokens. Set Worker secrets:
+Never commit tokens. After the first Workers Builds deploy succeeds, set these
+secrets on the `shixato` Worker (Dashboard → Settings → Variables and Secrets,
+or CLI):
 
 ```bash
 npx wrangler secret put SHOPIFY_ADMIN_API_TOKEN
@@ -54,6 +56,7 @@ npx wrangler secret put OPENAI_API_KEY
 ```
 
 `SHOPIFY_STORE_DOMAIN` is a non-secret `[vars]` value in `wrangler.toml`.
+Worker name in config is `shixato` (must match the Cloudflare project name).
 
 ## API
 
