@@ -1,3 +1,4 @@
+import { resolveSearchQuery } from "../data/categories";
 import type {
   AliExpressListing,
   AliExpressProduct,
@@ -19,7 +20,7 @@ export class AliExpressService {
   }
 
   buildSearchUrl(filters: ProductSearchFilters): string {
-    const slug = filters.query
+    const slug = (filters.query ?? "")
       .trim()
       .toLowerCase()
       .replace(/[^a-z0-9\s-]/g, " ")
@@ -56,14 +57,22 @@ export class AliExpressService {
   }
 
   async search(filters: ProductSearchFilters): Promise<AliExpressSearchResult> {
-    const q = filters.query.trim();
-    if (q.length < 2) {
-      throw new HttpError(400, "Search query must be at least 2 characters");
+    const resolved = resolveSearchQuery({
+      query: filters.query,
+      category: filters.category,
+    });
+
+    if (resolved.query.length < 2) {
+      throw new HttpError(
+        400,
+        "اختر فئة أو اكتب كلمة بحث — البحث الفارغ يحتاج فئة على الأقل",
+      );
     }
 
     const normalized: ProductSearchFilters = {
       ...filters,
-      query: q,
+      query: resolved.query,
+      category: resolved.categoryId ?? filters.category,
       page: filters.page && filters.page > 0 ? filters.page : 1,
       sort: filters.sort ?? "orders",
       currency: (filters.currency || "USD").toUpperCase(),
@@ -83,9 +92,13 @@ export class AliExpressService {
     const results = this.applyClientFilters(parsed, normalized);
 
     return {
-      query: q,
+      query: resolved.query,
       page: normalized.page!,
-      filtersApplied: { ...normalized },
+      filtersApplied: {
+        ...normalized,
+        categoryLabelAr: resolved.categoryLabelAr,
+        freeTextQuery: (filters.query ?? "").trim() || null,
+      },
       results,
       totalParsed: parsed.length,
       totalAfterFilter: results.length,
