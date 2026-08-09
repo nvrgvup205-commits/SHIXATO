@@ -56,6 +56,11 @@ export class AliExpressService {
     return `https://www.aliexpress.com/w/wholesale-${safe}.html${qs ? `?${qs}` : ""}`;
   }
 
+  /** Exposed for unit tests / diagnostics */
+  parseSearchHtml(html: string): AliExpressListing[] {
+    return this.parseSearchResults(html);
+  }
+
   async search(filters: ProductSearchFilters): Promise<AliExpressSearchResult> {
     const resolved = resolveSearchQuery({
       query: filters.query,
@@ -288,27 +293,98 @@ export class AliExpressService {
   }
 
   private parseSearchResults(html: string): AliExpressListing[] {
-    const blob = this.extractBalancedJson(html, '{"appData":');
-    if (!blob) return this.parseSearchResultsFallback(html);
-
-    try {
-      const data = JSON.parse(blob) as Record<string, unknown>;
-      const loaderData = data.loaderData as Record<string, unknown> | undefined;
-      const root = loaderData?.["/"] as Record<string, unknown> | undefined;
-      const pageData = root?.data as Record<string, unknown> | undefined;
-      const searchResult = pageData?.searchResult as
-        | Record<string, unknown>
-        | undefined;
-      const mods = searchResult?.mods as Record<string, unknown> | undefined;
-      const itemList = mods?.itemList as Record<string, unknown> | undefined;
-      const content = (itemList?.content as Array<Record<string, unknown>>) ?? [];
-
-      return content
+    // Current AE PC search embeds cards in `_dida_config_._init_data_` as
+    // `"itemList":{"content":[...]}` (not the older appData/loaderData shape).
+    const fromItemList = this.extractItemListContent(html);
+    if (fromItemList?.length) {
+      return fromItemList
         .map((item) => this.listingFromSearchItem(item))
         .filter((x): x is AliExpressListing => Boolean(x));
-    } catch {
-      return this.parseSearchResultsFallback(html);
     }
+
+    const blob = this.extractBalancedJson(html, '{"appData":');
+    if (blob) {
+      try {
+        const data = JSON.parse(blob) as Record<string, unknown>;
+        const loaderData = data.loaderData as Record<string, unknown> | undefined;
+        const root = loaderData?.["/"] as Record<string, unknown> | undefined;
+        const pageData = root?.data as Record<string, unknown> | undefined;
+        const searchResult = pageData?.searchResult as
+          | Record<string, unknown>
+          | undefined;
+        const mods = searchResult?.mods as Record<string, unknown> | undefined;
+        const itemList = mods?.itemList as Record<string, unknown> | undefined;
+        const content =
+          (itemList?.content as Array<Record<string, unknown>>) ?? [];
+        if (content.length) {
+          return content
+            .map((item) => this.listingFromSearchItem(item))
+            .filter((x): x is AliExpressListing => Boolean(x));
+        }
+      } catch {
+        // fall through
+      }
+    }
+
+    return this.parseSearchResultsFallback(html);
+  }
+
+  /** Pull `itemList.content` array from modern AliExpress search HTML/JS. */
+  private extractItemListContent(
+    html: string,
+  ): Array<Record<string, unknown>> | null {
+    const needles = [
+      '"itemList":{"content":[',
+      '"itemList":{ "content":[',
+      '"itemList":{"content" : [',
+    ];
+    let idx = -1;
+    let needle = needles[0]!;
+    for (const n of needles) {
+      idx = html.indexOf(n);
+      if (idx >= 0) {
+        needle = n;
+        break;
+      }
+    }
+    if (idx < 0) return null;
+
+    const arrStart = idx + needle.indexOf("[");
+    const arrJson = this.extractBalancedArray(html, arrStart);
+    if (!arrJson) return null;
+
+    try {
+      const content = JSON.parse(arrJson) as Array<Record<string, unknown>>;
+      return Array.isArray(content) ? content : null;
+    } catch {
+      return null;
+    }
+  }
+
+  private extractBalancedArray(source: string, start: number): string | null {
+    if (source[start] !== "[") return null;
+    let depth = 0;
+    let inStr = false;
+    let esc = false;
+    for (let i = start; i < source.length; i++) {
+      const ch = source[i]!;
+      if (inStr) {
+        if (esc) esc = false;
+        else if (ch === "\\") esc = true;
+        else if (ch === '"') inStr = false;
+        continue;
+      }
+      if (ch === '"') {
+        inStr = true;
+        continue;
+      }
+      if (ch === "[") depth += 1;
+      else if (ch === "]") {
+        depth -= 1;
+        if (depth === 0) return source.slice(start, i + 1);
+      }
+    }
+    return null;
   }
 
   private listingFromSearchItem(
