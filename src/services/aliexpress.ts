@@ -79,17 +79,55 @@ export class AliExpressService {
       shipToCountry: (filters.shipToCountry || "SA").toUpperCase(),
     };
 
-    const url = this.buildSearchUrl(normalized);
     const cookie = this.buildLocaleCookie(
       normalized.currency!,
       normalized.shipToCountry!,
     );
-    const html = await this.fetchHtml(url, {
-      allowShort: false,
-      cookie,
-    });
+
+    let usedFallbackUrl = false;
+    let html: string;
+    try {
+      html = await this.fetchHtml(this.buildSearchUrl(normalized), {
+        allowShort: false,
+        cookie,
+      });
+      if (this.isBlockedPage(html)) throw new Error("blocked");
+    } catch {
+      // Retry with a simpler URL (category/query + sort only) — AE often
+      // blocks when many filter query params are present.
+      usedFallbackUrl = true;
+      const minimal: ProductSearchFilters = {
+        query: normalized.query,
+        page: normalized.page,
+        sort: normalized.sort,
+      };
+      html = await this.fetchHtml(this.buildSearchUrl(minimal), {
+        allowShort: false,
+        cookie,
+      });
+      if (this.isBlockedPage(html)) {
+        throw new HttpError(
+          502,
+          "علي إكسبريس حظر الصفحة مؤقتًا. جرّب بعد دقيقة أو خفّف فلاتر السعر/الشحن",
+        );
+      }
+    }
+
     const parsed = this.parseSearchResults(html);
     const results = this.applyClientFilters(parsed, normalized);
+
+    let warning: string | undefined;
+    if (parsed.length === 0) {
+      warning = "علي إكسبريس لم يُرجع منتجات — جرّب فئة أخرى أو أعد المحاولة";
+    } else if (results.length === 0) {
+      warning =
+        `وجدنا ${parsed.length} منتجًا لكن الفلاتر المحلية استبعدتهم كلهم ` +
+        `(كلمات include/exclude، مبيعات، تقييمات، هامش ربح…). ` +
+        `اضغط «عرض النتائج بدون فلتر محلي» أو خفّف الفلاتر.`;
+    } else if (usedFallbackUrl) {
+      warning =
+        "تم البحث برابط مبسّط لأن علي إكسبريس رفض الفلاتر المتقدمة — طُبّقت الفلاتر محليًا";
+    }
 
     return {
       query: resolved.query,
@@ -100,8 +138,11 @@ export class AliExpressService {
         freeTextQuery: (filters.query ?? "").trim() || null,
       },
       results,
+      resultsBeforeFilter: parsed,
       totalParsed: parsed.length,
       totalAfterFilter: results.length,
+      warning,
+      usedFallbackUrl,
     };
   }
 

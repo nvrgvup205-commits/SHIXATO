@@ -124,8 +124,13 @@ export interface AliExpressSearchResult {
   page: number;
   filtersApplied: Record<string, unknown>;
   results: AliExpressListing[];
+  /** Results before local post-filters (for "show without filters" UX) */
+  resultsBeforeFilter?: AliExpressListing[];
   totalParsed: number;
   totalAfterFilter: number;
+  /** Arabic/English hint when filters wipe results or AE soft-fails */
+  warning?: string;
+  usedFallbackUrl?: boolean;
 }
 
 export type { ProductSearchFilters, SearchSort } from "./search";

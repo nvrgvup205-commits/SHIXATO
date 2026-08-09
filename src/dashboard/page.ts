@@ -175,7 +175,10 @@ export function renderDashboardPage(storeDomain: string): string {
   <div class="wrap">
     <header class="appbar">
       <h1 class="brand">SHI<span>XATO</span></h1>
-      <div class="store-pill">${store}</div>
+      <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap">
+        <a class="btn btn-accent" id="openStoreBtn" href="https://${store}" target="_blank" rel="noopener" style="text-decoration:none">دخول المتجر</a>
+        <div class="store-pill">${store}</div>
+      </div>
     </header>
 
     <section id="gate" class="panel gate">
@@ -298,12 +301,12 @@ export function renderDashboardPage(storeDomain: string): string {
             <input id="minMarginPercent" type="number" min="0" max="95" step="1" placeholder="40" />
           </div>
           <div>
-            <label for="includeKeywords">كلمات يجب أن تظهر</label>
-            <input id="includeKeywords" placeholder="wireless, bluetooth" />
+            <label for="includeKeywords">كلمات يجب أن تظهر (اختياري)</label>
+            <input id="includeKeywords" placeholder="اتركه فارغًا إن لم تحتج" />
           </div>
           <div>
-            <label for="excludeKeywords">استبعاد كلمات</label>
-            <input id="excludeKeywords" placeholder="kids, wholesale lot" />
+            <label for="excludeKeywords">استبعاد كلمات (اختياري)</label>
+            <input id="excludeKeywords" placeholder="اتركه فارغًا إن لم تحتج" />
           </div>
 
           <label class="check"><input id="freeShipping" type="checkbox" /> شحن مجاني</label>
@@ -314,8 +317,12 @@ export function renderDashboardPage(storeDomain: string): string {
           <label class="check"><input id="requireFreeShippingBadge" type="checkbox" /> شارة شحن مجاني</label>
         </div>
 
-        <p class="hint">أكثر من 20 فلتر: سعر، مبيعات، تقييم، تقييمات سلبية تقديرية، بلد/عملة، Choice، فايرل، هامش ربح…</p>
+        <p class="hint">نصيحة: ابدأ بفئة + ترتيب فقط، ولو ما في نتائج خفّف «كلمات يجب أن تظهر» وعدد التقييمات/المبيعات — كثير من الفلاتر المحلية تستبعد كل البطاقات.</p>
         <div id="searchStatus" class="hint"></div>
+        <div id="filterActions" class="hidden" style="margin:.5rem 0">
+          <button class="btn btn-ghost" id="showRawBtn" type="button">عرض النتائج بدون فلتر محلي</button>
+          <button class="btn btn-ghost" id="clearLocalFiltersBtn" type="button">مسح الفلاتر المحلية القاسية</button>
+        </div>
         <div id="results" class="grid"></div>
       </section>
 
@@ -344,8 +351,31 @@ export function renderDashboardPage(storeDomain: string): string {
 
       <section id="tab-settings" class="panel hidden">
         <p class="hint">المتجر: <strong>${store}</strong></p>
-        <p class="hint">لتغيير الرقم السري عيّن Secret اسمه <code>DASHBOARD_PIN</code> في Cloudflare.</p>
-        <button class="btn btn-ghost" id="logoutBtn" type="button">خروج</button>
+        <div style="display:flex;gap:.55rem;flex-wrap:wrap;margin-bottom:1rem">
+          <a class="btn btn-accent" href="https://${store}" target="_blank" rel="noopener" style="text-decoration:none">دخول المتجر</a>
+          <a class="btn btn-ghost" href="https://${store}/admin" target="_blank" rel="noopener" style="text-decoration:none">لوحة Shopify Admin</a>
+        </div>
+
+        <h3 style="margin:0 0 .5rem;font-family:var(--display)">تغيير الرقم السري</h3>
+        <div class="filters">
+          <div>
+            <label for="currentPin">الرقم الحالي</label>
+            <input id="currentPin" type="password" inputmode="numeric" placeholder="1111" />
+          </div>
+          <div>
+            <label for="newPin">الرقم الجديد</label>
+            <input id="newPin" type="password" inputmode="numeric" placeholder="مثلاً 2222" />
+          </div>
+          <div>
+            <label for="newPin2">تأكيد الرقم الجديد</label>
+            <input id="newPin2" type="password" inputmode="numeric" placeholder="أعد الكتابة" />
+          </div>
+        </div>
+        <div style="display:flex;gap:.55rem;flex-wrap:wrap;margin-top:.8rem">
+          <button class="btn btn-primary" id="changePinBtn" type="button">تغيير كلمة السر</button>
+          <button class="btn btn-ghost" id="logoutBtn" type="button">خروج</button>
+        </div>
+        <p class="hint">يُحفظ الرقم في Supabase (<code>shixato.app_settings</code>). نفّذ migration الجدول إن لم يكن موجودًا.</p>
       </section>
     </section>
   </div>
@@ -374,7 +404,7 @@ export function renderDashboardPage(storeDomain: string): string {
   <div class="toast" id="toast"></div>
 
   <script>
-    const state = { listing: null };
+    const state = { listing: null, lastSearch: null };
 
     const $ = (id) => document.getElementById(id);
     const toast = (msg, err=false) => {
@@ -529,12 +559,14 @@ export function renderDashboardPage(storeDomain: string): string {
       }
       $("searchBtn").disabled = true;
       $("searchStatus").textContent = "جاري البحث وتصفية النتائج...";
+      $("filterActions").classList.add("hidden");
       try {
         const res = await api("/api/products/search", {
           method: "POST",
           body: JSON.stringify(filters),
         });
         const data = res.data || {};
+        state.lastSearch = data;
         const items = data.results || [];
         const via = (data.filtersApplied && data.filtersApplied.categoryLabelAr)
           ? (" · فئة: " + data.filtersApplied.categoryLabelAr)
@@ -542,11 +574,21 @@ export function renderDashboardPage(storeDomain: string): string {
         $("searchStatus").textContent =
           "نتائج: " + (data.totalAfterFilter ?? items.length) +
           " بعد الفلتر / " + (data.totalParsed ?? items.length) + " قبل الفلتر المحلي" +
-          " · بحث: " + (data.query || "") + via;
+          " · بحث: " + (data.query || "") + via +
+          (data.warning ? (" — " + data.warning) : "");
+
+        const wiped = (data.totalParsed > 0 && items.length === 0);
+        $("filterActions").classList.toggle("hidden", !wiped && !data.warning);
+
         renderResults(items);
-        if (!items.length) toast("لا نتائج مطابقة — خفّف الفلاتر", true);
+        if (wiped) {
+          toast("الفلاتر استبعدت كل النتائج — جرّب العرض بدون فلتر محلي", true);
+        } else if (!items.length) {
+          toast(data.warning || "لا نتائج — خفّف الفلاتر أو غيّر الفئة", true);
+        }
       } catch (e) {
         $("searchStatus").textContent = "";
+        $("filterActions").classList.add("hidden");
         toast(e.message || "فشل البحث", true);
       } finally {
         $("searchBtn").disabled = false;
@@ -554,6 +596,45 @@ export function renderDashboardPage(storeDomain: string): string {
     }
     $("searchBtn").onclick = runSearch;
     $("query").addEventListener("keydown", (e) => { if (e.key === "Enter") runSearch(); });
+
+    $("showRawBtn").onclick = () => {
+      const raw = (state.lastSearch && state.lastSearch.resultsBeforeFilter) || [];
+      if (!raw.length) return toast("لا توجد نتائج خام", true);
+      renderResults(raw);
+      $("searchStatus").textContent =
+        "عرض " + raw.length + " نتيجة بدون فلتر محلي (يمكنك الرفع مباشرة)";
+      toast("تم عرض النتائج قبل الفلتر المحلي");
+    };
+
+    $("clearLocalFiltersBtn").onclick = () => {
+      ["minSold","maxSold","minRating","minReviews","maxNegativeRate","minDiscountPercent","targetSellingPrice","minMarginPercent","includeKeywords","excludeKeywords"].forEach((id) => {
+        $(id).value = "";
+      });
+      ["freeShipping","choiceOnly","highRatedSellers","unitPrice","requireViralBadge","requireFreeShippingBadge"].forEach((id) => {
+        $(id).checked = false;
+      });
+      toast("تم مسح الفلاتر المحلية — اضغط بحث مرة أخرى");
+    };
+
+    $("changePinBtn").onclick = async () => {
+      const currentPin = $("currentPin").value.trim();
+      const newPin = $("newPin").value.trim();
+      const newPin2 = $("newPin2").value.trim();
+      if (!currentPin || !newPin) return toast("أكمل الحقول", true);
+      if (newPin !== newPin2) return toast("تأكيد الرقم غير متطابق", true);
+      try {
+        await api("/api/auth/change-pin", {
+          method: "POST",
+          body: JSON.stringify({ currentPin, newPin }),
+        });
+        $("currentPin").value = "";
+        $("newPin").value = "";
+        $("newPin2").value = "";
+        toast("تم تغيير الرقم السري بنجاح");
+      } catch (e) {
+        toast(e.message || "فشل تغيير الرقم", true);
+      }
+    };
 
     function openDrawer(item) {
       state.listing = item;
