@@ -1,0 +1,27 @@
+{
+  "name": "shixato-aliexpress-shopify-automation",
+  "version": "1.0.0",
+  "private": true,
+  "description": "AliExpress → AI filter → Shopify automation on Cloudflare Workers",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "typecheck": "tsc --noEmit",
+    "cf-typegen": "wrangler types",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.49.1",
+    "hono": "^4.7.2"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260801.1",
+    "typescript": "^5.8.2",
+    "vitest": "^3.0.8",
+    "wrangler": "^4.1.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

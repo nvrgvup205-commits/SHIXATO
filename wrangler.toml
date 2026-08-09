@@ -1,0 +1,40 @@
+# Cloudflare Workers — SHIXATO AliExpress → Shopify Automation
+# Secrets are NEVER stored here. Set them with:
+#   npx wrangler secret put SHOPIFY_ADMIN_API_TOKEN
+#   npx wrangler secret put SUPABASE_SERVICE_ROLE_KEY
+#   npx wrangler secret put API_KEY
+#   npx wrangler secret put OPENAI_API_KEY   # optional AI filter
+#
+# Local development: copy .env.example → .dev.vars
+
+name = "shixato-automation"
+main = "src/index.ts"
+compatibility_date = "2026-03-17"
+compatibility_flags = ["nodejs_compat"]
+
+# Non-sensitive configuration (safe to commit)
+[vars]
+ENVIRONMENT = "production"
+SHOPIFY_STORE_DOMAIN = "shxato.myshopify.com"
+SHOPIFY_API_VERSION = "2025-01"
+# Markup applied when selling_price is not provided (e.g. 1.4 = +40%)
+DEFAULT_MARKUP = "1.4"
+# Max images to push to Shopify per product
+MAX_PRODUCT_IMAGES = "8"
+
+# Declare required secrets so Wrangler warns if missing in local .dev.vars
+[secrets]
+required = [
+  "SHOPIFY_ADMIN_API_TOKEN",
+  "SUPABASE_URL",
+  "SUPABASE_SERVICE_ROLE_KEY",
+  "API_KEY"
+]
+
+# Optional: Workers AI for product filtering
+# [ai]
+# binding = "AI"
+
+[observability]
+enabled = true
+head_sampling_rate = 1
