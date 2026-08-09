@@ -58,8 +58,26 @@ function sessionSecret(env: Env): string {
   return env.API_KEY || env.DASHBOARD_PIN || "shixato-dev-secret";
 }
 
-export function getDashboardPin(env: Env): string {
+export function getEnvDashboardPin(env: Env): string {
   return (env.DASHBOARD_PIN || "1111").trim();
+}
+
+/** @deprecated use resolveDashboardPin — sync env fallback only */
+export function getDashboardPin(env: Env): string {
+  return getEnvDashboardPin(env);
+}
+
+/** Prefer PIN stored in Supabase; fall back to env DASHBOARD_PIN / 1111 */
+export async function resolveDashboardPin(env: Env): Promise<string> {
+  try {
+    const { SupabaseService } = await import("../services/supabase");
+    const db = new SupabaseService(env);
+    const stored = await db.getSetting("dashboard_pin");
+    if (stored && stored.trim()) return stored.trim();
+  } catch {
+    // Supabase not configured / table missing
+  }
+  return getEnvDashboardPin(env);
 }
 
 export async function issueSessionToken(env: Env): Promise<string> {

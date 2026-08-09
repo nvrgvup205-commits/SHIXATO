@@ -174,4 +174,35 @@ export class SupabaseService {
 
     return (data as SyncLogRecord[]) ?? [];
   }
+
+  async getSetting(key: string): Promise<string | null> {
+    const { data, error } = await this.client
+      .from("app_settings")
+      .select("value")
+      .eq("key", key)
+      .maybeSingle();
+
+    if (error) {
+      // Table may not exist yet before migration — treat as unset
+      console.warn("getSetting failed", key, error.message);
+      return null;
+    }
+
+    return typeof data?.value === "string" ? data.value : null;
+  }
+
+  async setSetting(key: string, value: string): Promise<void> {
+    const { error } = await this.client.from("app_settings").upsert(
+      {
+        key,
+        value,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "key" },
+    );
+
+    if (error) {
+      throw new HttpError(500, "Failed to save setting", error);
+    }
+  }
 }
