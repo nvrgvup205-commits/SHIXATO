@@ -1,4 +1,10 @@
-import type { Env, ImportProductInput, ImportProductResult } from "../types";
+import type {
+  AliExpressProduct,
+  AliExpressSearchResult,
+  Env,
+  ImportProductInput,
+  ImportProductResult,
+} from "../types";
 import { applyMarkup, clampImages, extractAliExpressId, HttpError } from "../utils/http";
 import { AiFilterService } from "./ai-filter";
 import { AliExpressService } from "./aliexpress";
@@ -25,13 +31,40 @@ export class ImportPipeline {
     this.maxImages = Number(env.MAX_PRODUCT_IMAGES ?? "8") || 8;
   }
 
-  async importProduct(input: ImportProductInput): Promise<ImportProductResult> {
-    const source = input.url ?? input.aliexpressId;
-    if (!source) {
-      throw new HttpError(400, "Provide url or aliexpressId");
+  async searchProducts(query: string, page = 1): Promise<AliExpressSearchResult> {
+    return this.aliexpress.search(query, page);
+  }
+
+  private async resolveProduct(input: ImportProductInput): Promise<AliExpressProduct> {
+    if (input.listing) {
+      return this.aliexpress.fromListing(input.listing);
     }
 
-    const scraped = await this.aliexpress.fetchProduct(source);
+    const source = input.url ?? input.aliexpressId;
+    if (!source) {
+      throw new HttpError(400, "Provide url, aliexpressId, or listing");
+    }
+
+    try {
+      return await this.aliexpress.fetchProduct(source);
+    } catch (err) {
+      // Last resort: minimal listing from id so dashboard import still works
+      const id = extractAliExpressId(source);
+      if (!id) throw err;
+      return this.aliexpress.fromListing({
+        aliexpressId: id,
+        title: `AliExpress Product ${id}`,
+        url: this.aliexpress.buildProductUrl(id),
+        image: "",
+        images: [],
+        originalPrice: 0,
+        currency: "USD",
+      });
+    }
+  }
+
+  async importProduct(input: ImportProductInput): Promise<ImportProductResult> {
+    const scraped = await this.resolveProduct(input);
     const sellingPrice =
       input.sellingPrice ??
       applyMarkup(scraped.originalPrice, input.markup ?? this.markup);
@@ -146,12 +179,8 @@ export class ImportPipeline {
     }
   }
 
-  async preview(input: { url?: string; aliexpressId?: string }) {
-    const source = input.url ?? input.aliexpressId;
-    if (!source) throw new HttpError(400, "Provide url or aliexpressId");
-    const id = extractAliExpressId(source);
-    if (!id) throw new HttpError(400, "Invalid AliExpress URL or product id");
-    return this.aliexpress.fetchProduct(source);
+  async preview(input: ImportProductInput) {
+    return this.resolveProduct(input);
   }
 
   get dbService() {

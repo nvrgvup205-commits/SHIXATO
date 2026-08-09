@@ -91,6 +91,25 @@ export interface AiFilterResult {
   tags?: string[];
 }
 
+/** Search-result card used when PDP scrape is blocked */
+export interface AliExpressListing {
+  aliexpressId: string;
+  title: string;
+  url: string;
+  image: string;
+  images?: string[];
+  originalPrice: number;
+  currency: string;
+  sold?: string;
+  rating?: number;
+}
+
+export interface AliExpressSearchResult {
+  query: string;
+  page: number;
+  results: AliExpressListing[];
+}
+
 export interface ImportProductInput {
   url?: string;
   aliexpressId?: string;
@@ -100,6 +119,11 @@ export interface ImportProductInput {
   sellingPrice?: number;
   /** Markup multiplier if sellingPrice omitted (default from env) */
   markup?: number;
+  /**
+   * When AliExpress product pages are blocked, pass listing data from search
+   * so import can proceed without a full PDP scrape.
+   */
+  listing?: AliExpressListing;
 }
 
 export interface ImportProductResult {

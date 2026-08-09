@@ -89,16 +89,27 @@ npx wrangler secret put OPENAI_API_KEY
 `SHOPIFY_STORE_DOMAIN` is a non-secret `[vars]` value in `wrangler.toml`.
 Worker name in config is `shixato` (must match the Cloudflare project name).
 
+## Dashboard
+
+Open **`/dashboard`** on the Worker (browsers hitting `/` redirect there).
+
+1. Paste your Cloudflare `API_KEY`
+2. Search AliExpress by keyword
+3. Open a product → set selling price (optional) → **رفع إلى Shopify**
+4. Review **منتجاتي** and **سجلات الرفع**
+
 ## API
 
 All mutating / data routes require `Authorization: Bearer <API_KEY>`.
 
 | Method | Path | Description |
 |--------|------|-------------|
+| `GET` | `/dashboard` | Admin UI |
 | `GET` | `/health` | Liveness |
-| `POST` | `/api/products/preview` | Scrape only |
-| `POST` | `/api/products/import` | Scrape → AI → DB → Shopify |
-| `GET` | `/api/products` | List stored products |
+| `POST` | `/api/products/search` | AliExpress keyword search |
+| `POST` | `/api/products/preview` | Preview from URL/id/listing |
+| `POST` | `/api/products/import` | Import → AI → DB → Shopify |
+| `GET` | `/api/products` | List stored products (`?q=` filter) |
 | `GET` | `/api/sync/logs` | Sync audit trail |
 
 ### Import body
