@@ -1511,6 +1511,16 @@ export function renderDashboardPage(storeDomain: string): string {
         });
         const a = res.data || {};
         state.lastAiAnalysis = a;
+        if (a.listing) {
+          state.listing = { ...state.listing, ...a.listing };
+          $("dSold").textContent =
+            state.listing.sold ||
+            (state.listing.soldCount != null ? String(state.listing.soldCount) : "—");
+          $("dReviews").textContent =
+            state.listing.reviewCount != null ? String(state.listing.reviewCount) : "—";
+          $("dRating").textContent =
+            state.listing.rating != null ? String(state.listing.rating) : "—";
+        }
         state.listing = applyAiToListing(state.listing, a);
         updateFavoriteBtnState();
         const pros = (a.pros || []).map((x) => "<li>✅ " + escapeHtml(x) + "</li>").join("");
