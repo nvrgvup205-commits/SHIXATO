@@ -25,4 +25,10 @@ describe("renderDashboardPage", () => {
     expect(html).toContain('id="loginBtn"');
     expect(html).toContain('("loginBtn").onclick = login');
   });
+
+  it("includes auto discover banner", () => {
+    const html = renderDashboardPage("test.myshopify.com");
+    expect(html).toContain('id="autoDiscoverBtn"');
+    expect(html).toContain("اكتشاف تلقائي مبهر");
+  });
 });

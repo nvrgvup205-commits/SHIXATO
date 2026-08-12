@@ -5,7 +5,7 @@ export type DropshipGrade = "starter" | "balanced" | "pro";
 
 const CURRENT_YEAR = new Date().getUTCFullYear();
 
-const DISCOVERY_EXCLUDES =
+export const DISCOVERY_EXCLUDES =
   "replica,fake,counterfeit,sticker,stickers,coloring book,random style,assorted,wholesale,bulk lot,mixed styles,generic";
 
 export interface DropshipPreset {
