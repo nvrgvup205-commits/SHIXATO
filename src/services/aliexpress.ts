@@ -1,4 +1,5 @@
 import { resolveSearchQuery } from "../data/categories";
+import { slugifyWholesaleQuery } from "../data/aliexpress-search-url";
 import type {
   AliExpressListing,
   AliExpressProduct,
@@ -7,7 +8,13 @@ import type {
   ProductSearchFilters,
 } from "../types";
 import { SEARCH_SORT_MAP } from "../types/search";
-import { extractAliExpressId, fetchWithTimeout, HttpError } from "../utils/http";
+import {
+  canonicalAliExpressProductUrl,
+  extractAliExpressId,
+  fetchWithTimeout,
+  HttpError,
+  resolveAliExpressProductUrl,
+} from "../utils/http";
 
 /**
  * AliExpress product extractor + search.
@@ -16,18 +23,11 @@ import { extractAliExpressId, fetchWithTimeout, HttpError } from "../utils/http"
  */
 export class AliExpressService {
   buildProductUrl(aliexpressId: string): string {
-    return `https://www.aliexpress.com/item/${aliexpressId}.html`;
+    return canonicalAliExpressProductUrl(aliexpressId);
   }
 
   buildSearchUrl(filters: ProductSearchFilters): string {
-    const slug = (filters.query ?? "")
-      .trim()
-      .toLowerCase()
-      .replace(/[^a-z0-9\s-]/g, " ")
-      .replace(/\s+/g, "-")
-      .replace(/-+/g, "-")
-      .replace(/^-|-$/g, "");
-    const safe = slug || "product";
+    const safe = slugifyWholesaleQuery(filters.query ?? "");
     const params = new URLSearchParams();
     const page = filters.page && filters.page > 1 ? filters.page : 1;
     if (page > 1) params.set("page", String(page));
@@ -89,24 +89,26 @@ export class AliExpressService {
       normalized.shipToCountry!,
     );
 
+    const searchUrl = this.buildSearchUrl(normalized);
     let usedFallbackUrl = false;
     let html: string;
     try {
-      html = await this.fetchHtml(this.buildSearchUrl(normalized), {
+      html = await this.fetchHtml(searchUrl, {
         allowShort: false,
         cookie,
       });
       if (this.isBlockedPage(html)) throw new Error("blocked");
     } catch {
-      // Retry with a simpler URL (category/query + sort only) — AE often
-      // blocks when many filter query params are present.
+      // Retry with a simpler URL (query + sort only) when AE anti-bot rejects
+      // the full filtered URL — local post-filters still apply after parse.
       usedFallbackUrl = true;
       const minimal: ProductSearchFilters = {
         query: normalized.query,
         page: normalized.page,
         sort: normalized.sort,
       };
-      html = await this.fetchHtml(this.buildSearchUrl(minimal), {
+      const fallbackUrl = this.buildSearchUrl(minimal);
+      html = await this.fetchHtml(fallbackUrl, {
         allowShort: false,
         cookie,
       });
@@ -137,6 +139,14 @@ export class AliExpressService {
     return {
       query: resolved.query,
       page: normalized.page!,
+      searchUrl,
+      searchUrlUsed: usedFallbackUrl
+        ? this.buildSearchUrl({
+            query: normalized.query,
+            page: normalized.page,
+            sort: normalized.sort,
+          })
+        : searchUrl,
       filtersApplied: {
         ...normalized,
         categoryLabelAr: resolved.categoryLabelAr,
@@ -464,9 +474,9 @@ export class AliExpressService {
         : undefined;
 
     const detailUrl = this.asString(item.productDetailUrl);
-    const url = detailUrl.startsWith("//")
-      ? `https:${detailUrl}`
-      : detailUrl || this.buildProductUrl(aliexpressId);
+    const url =
+      resolveAliExpressProductUrl(detailUrl, aliexpressId) ??
+      this.buildProductUrl(aliexpressId);
 
     const shipFrom =
       this.asString(extra?.shipFrom) ||
