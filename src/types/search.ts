@@ -55,6 +55,11 @@ export interface ProductSearchFilters {
   /** Sellability helpers */
   targetSellingPrice?: number;
   minMarginPercent?: number;
+
+  /** Prefer trustworthy + unique listings (default for smart search) */
+  discoveryMode?: boolean;
+  /** Boost/filter listings from this launch year (e.g. 2026) */
+  minLaunchYear?: number;
 }
 
 export const SEARCH_SORT_MAP: Record<SearchSort, string | undefined> = {

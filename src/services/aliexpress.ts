@@ -16,6 +16,11 @@ import {
   resolveAliExpressProductUrl,
 } from "../utils/http";
 import { resolveArabicDescriptionHtml } from "../utils/arabic-product";
+import {
+  enrichListingQuality,
+  isSuspiciousMetrics,
+  passesDiscoveryGate,
+} from "../utils/listing-discovery";
 
 /**
  * AliExpress product extractor + search.
@@ -615,7 +620,12 @@ export class AliExpressService {
 
     const isViral =
       badges.some((b) => /viral|trending|hot|bestseller|top/i.test(b)) ||
-      (soldCount != null && soldCount >= 1000);
+      ((soldCount ?? 0) >= 1000 &&
+        !isSuspiciousMetrics({
+          title,
+          soldCount,
+          reviewCount,
+        }));
 
     // Card pages rarely expose explicit negative counts — estimate from stars.
     const negativeRateEstimate =
@@ -881,25 +891,52 @@ export class AliExpressService {
     const exclude = this.splitKeywords(filters.excludeKeywords);
 
     if (mode === "soft") {
+      const discoveryOn = filters.discoveryMode !== false;
+      const targetYear =
+        filters.minLaunchYear ?? new Date().getUTCFullYear();
+
       const scored = items
         .filter((item) => {
           const title = item.title.toLowerCase();
           return !exclude.some((k) => title.includes(k));
         })
-        .map((item) => ({
-          item,
-          score: this.scoreListing(item, filters),
-        }))
+        .map((item) => {
+          const enriched = discoveryOn
+            ? enrichListingQuality(item, targetYear)
+            : item;
+          return {
+            item: enriched,
+            score: this.scoreListing(enriched, filters),
+          };
+        })
+        .filter(({ item }) => {
+          if (!discoveryOn) return true;
+          return passesDiscoveryGate(
+            {
+              trustScore: item.trustScore ?? 0,
+              uniquenessScore: item.uniquenessScore ?? 0,
+              discoveryScore: item.discoveryScore ?? 0,
+              suspiciousMetrics: Boolean(item.suspiciousMetrics),
+              launchYear: item.launchYear,
+              isCurrentYear: Boolean(item.isCurrentYear),
+              genericTitle: Boolean(item.genericTitle),
+              problemSolvingTitle: Boolean(item.problemSolvingTitle),
+            },
+            filters.presetGrade,
+          );
+        })
         .sort((a, b) => b.score - a.score);
 
       const minScore =
         filters.presetGrade === "pro"
-          ? 58
+          ? 62
           : filters.presetGrade === "balanced"
-            ? 48
+            ? 52
             : filters.presetGrade === "starter"
-              ? 38
-              : 45;
+              ? 42
+              : discoveryOn
+                ? 48
+                : 45;
 
       let results = scored
         .filter((s) => s.score >= minScore)
@@ -974,46 +1011,59 @@ export class AliExpressService {
     item: AliExpressListing,
     filters: ProductSearchFilters,
   ): number {
-    let score = 40;
+    const discoveryOn = filters.discoveryMode !== false;
+    let score =
+      discoveryOn && item.discoveryScore != null
+        ? item.discoveryScore
+        : 40;
 
-    if (filters.minSold != null) {
-      const sold = item.soldCount ?? 0;
-      if (sold >= filters.minSold) score += 28;
-      else if (sold >= filters.minSold * 0.5) score += 12;
-      else score -= 8;
-    } else if ((item.soldCount ?? 0) > 0) {
-      score += 10;
+    if (!discoveryOn || item.discoveryScore == null) {
+      score = 40;
+      if (filters.minSold != null) {
+        const sold = item.soldCount ?? 0;
+        if (sold >= filters.minSold) score += 28;
+        else if (sold >= filters.minSold * 0.5) score += 12;
+        else score -= 8;
+      } else if ((item.soldCount ?? 0) > 0) {
+        score += 10;
+      }
+    } else {
+      if (item.problemSolvingTitle) score += 8;
+      if (item.isCurrentYear) score += 10;
+      else if (item.launchYear != null) score -= 6;
+      if (item.suspiciousMetrics) score = Math.min(score, 20);
+      if (item.genericTitle && !item.problemSolvingTitle) score -= 12;
     }
 
     if (filters.minRating != null) {
       const rating = item.rating ?? 0;
-      if (rating >= filters.minRating) score += 18;
-      else if (rating >= filters.minRating - 0.3) score += 6;
+      if (rating >= filters.minRating) score += 12;
+      else if (rating >= filters.minRating - 0.3) score += 4;
       else score -= 10;
     } else if ((item.rating ?? 0) >= 4.3) {
-      score += 8;
+      score += 6;
     }
 
     if (filters.minReviews != null) {
       const reviews = item.reviewCount ?? 0;
-      if (reviews >= filters.minReviews) score += 12;
-      else if (reviews >= filters.minReviews * 0.4) score += 4;
+      if (reviews >= filters.minReviews) score += 10;
+      else if (reviews >= filters.minReviews * 0.4) score += 3;
     }
 
     if (filters.maxNegativeRate != null) {
       const neg = item.negativeRateEstimate ?? 50;
-      if (neg <= filters.maxNegativeRate) score += 8;
+      if (neg <= filters.maxNegativeRate) score += 6;
       else score -= 6;
     }
 
     if (filters.minDiscountPercent != null && (item.discountPercent ?? 0) >= filters.minDiscountPercent) {
-      score += 6;
+      score += 5;
     }
 
-    if (item.isChoice) score += 5;
-    if (item.isFreeShipping) score += 5;
-    if (item.isViral) score += 4;
-    if (this.hasArabic(item.title)) score += 3;
+    if (item.isChoice) score += 4;
+    if (item.isFreeShipping) score += 4;
+    if (item.isViral && !item.suspiciousMetrics) score += 3;
+    if (this.hasArabic(item.title)) score += 2;
 
     if (
       filters.targetSellingPrice != null &&
@@ -1024,14 +1074,17 @@ export class AliExpressService {
         ((filters.targetSellingPrice - item.originalPrice) /
           filters.targetSellingPrice) *
         100;
-      if (margin >= filters.minMarginPercent) score += 14;
-      else if (margin >= filters.minMarginPercent - 10) score += 4;
+      if (margin >= filters.minMarginPercent) score += 10;
+      else if (margin >= filters.minMarginPercent - 10) score += 3;
       else score -= 6;
     }
 
-    if (item.originalPrice > 0 && item.originalPrice <= 35) score += 4;
+    if (item.originalPrice > 0 && item.originalPrice <= 35) score += 3;
 
-    return Math.max(0, Math.min(100, score));
+    const targetYear = filters.minLaunchYear ?? new Date().getUTCFullYear();
+    if (item.launchYear === targetYear) score += 8;
+
+    return Math.max(0, Math.min(100, Math.round(score)));
   }
 
   private splitKeywords(value?: string): string[] {
