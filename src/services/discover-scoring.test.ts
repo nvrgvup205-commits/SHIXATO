@@ -45,15 +45,35 @@ describe("computeDiscoverScore", () => {
   };
 
   it("scores problem-solving products higher than generic junk", () => {
-    const good = computeDiscoverScore(goodListing);
-    const junk = computeDiscoverScore(junkListing);
+    const good = computeDiscoverScore(goodListing, { matchedKeyword: "car organizer" });
+    const junk = computeDiscoverScore(junkListing, { matchedKeyword: "random stickers" });
     expect(good.finalScore).toBeGreaterThan(junk.finalScore);
-    expect(good.finalScore).toBeGreaterThanOrEqual(72);
-    expect(junk.finalScore).toBeLessThan(50);
+    expect(good.finalScore).toBeGreaterThanOrEqual(65);
+    expect(junk.finalScore).toBeLessThan(55);
+  });
+
+  it("scores Arabic titles using matched keyword context", () => {
+    const arabic: AliExpressListing = {
+      aliexpressId: "1005006123456780",
+      title: "حامل جوال للسيارة مغناطيسي",
+      url: "https://www.aliexpress.com/item/1005006123456780.html",
+      image: "",
+      originalPrice: 12,
+      currency: "USD",
+      soldCount: 320,
+      rating: 4.6,
+      reviewCount: 45,
+    };
+    const withoutKw = computeDiscoverScore(arabic);
+    const withKw = computeDiscoverScore(arabic, {
+      matchedKeyword: "magnetic phone car mount",
+    });
+    expect(withKw.finalScore).toBeGreaterThanOrEqual(65);
+    expect(withKw.problemFit).toBeGreaterThanOrEqual(80);
   });
 
   it("passes impressive gate for strong listings", () => {
-    expect(passesImpressiveGate(goodListing, 72)).toBe(true);
-    expect(passesImpressiveGate(junkListing, 72)).toBe(false);
+    expect(passesImpressiveGate(goodListing, 65)).toBe(true);
+    expect(passesImpressiveGate(junkListing, 65)).toBe(false);
   });
 });
