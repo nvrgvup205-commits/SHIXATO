@@ -477,6 +477,12 @@ export function renderDashboardPage(storeDomain: string): string {
       $("app").classList.toggle("hidden", !on);
     }
 
+    function escapeHtml(s) {
+      return String(s || "")
+        .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+    }
+
     async function loadLoginHint() {
       try {
         const hint = await fetch("/api/auth/hint", { credentials: "include" })
@@ -488,7 +494,7 @@ export function renderDashboardPage(storeDomain: string): string {
         }
         if (hint?.data && !hint.data.supabaseReachable) {
           $("loginHint").innerHTML +=
-            " <span style=\"color:var(--danger)\">(Supabase غير متصل — استخدم 1111)</span>";
+            ' <span style="color:var(--danger)">(Supabase غير متصل — استخدم 1111)</span>';
         }
       } catch (_) { /* ignore */ }
     }
@@ -596,12 +602,6 @@ export function renderDashboardPage(storeDomain: string): string {
       }
     }
 
-    function escapeHtml(s) {
-      return String(s || "")
-        .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
-        .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
-    }
-
     function aeProductUrl(item) {
       const id = item.aliexpressId || "";
       if (item.url && item.url.indexOf("/item/") >= 0) return item.url;
@@ -610,7 +610,7 @@ export function renderDashboardPage(storeDomain: string): string {
 
     function formatDeliveryText(text) {
       if (!text) return "";
-      return String(text).replace(/^Delivery:\s*/i, "توصيل: ");
+      return String(text).replace(/^Delivery:\\s*/i, "توصيل: ");
     }
 
     function formatShippingType(item) {
@@ -691,7 +691,7 @@ export function renderDashboardPage(storeDomain: string): string {
           if (typeof line === "string") {
             return "<span>" + escapeHtml(line) + "</span>";
           }
-          return "<span class=\"" + escapeHtml(line.cls || "") + "\">" +
+          return '<span class="' + escapeHtml(line.cls || "") + '">' +
             escapeHtml(line.text) + "</span>";
         }).join("");
         el.innerHTML =
@@ -926,7 +926,7 @@ export function renderDashboardPage(storeDomain: string): string {
       ).join("");
       const reviews = product.attributes?.reviewCount || product.attributes?.rating;
       box.innerHTML =
-        "<h3 style=\"margin:0 0 .5rem\">" + escapeHtml(product.title) + "</h3>" +
+        "<h3 style='margin:0 0 .5rem'>" + escapeHtml(product.title) + "</h3>" +
         '<div class="price">' + money(product.originalPrice, product.currency) +
         (product.images ? (" · " + product.images.length + " صورة") : "") + "</div>" +
         '<div class="img-gallery" style="margin-top:.5rem">' + gallery + "</div>" +
@@ -941,7 +941,7 @@ export function renderDashboardPage(storeDomain: string): string {
         const res = await api("/api/products/preview", {
           method: "POST",
           body: JSON.stringify(
-            /^\d{6,20}$/.test(raw) ? { aliexpressId: raw } : { url: raw },
+            /^\\d{6,20}$/.test(raw) ? { aliexpressId: raw } : { url: raw },
           ),
         });
         state.addPreview = res.data;
@@ -978,7 +978,7 @@ export function renderDashboardPage(storeDomain: string): string {
               },
             }
           : {
-              ...( /^\d{6,20}$/.test(raw) ? { aliexpressId: raw } : { url: raw }),
+              ...( /^\\d{6,20}$/.test(raw) ? { aliexpressId: raw } : { url: raw }),
               force: true,
               sellingPrice: selling,
             };
