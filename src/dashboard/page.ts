@@ -201,10 +201,17 @@ export function renderDashboardPage(storeDomain: string): string {
     .stat b { display: block; font-size: .78rem; color: var(--muted); font-weight: 600; }
     details.more { margin-top: .7rem; }
     details.more summary { cursor: pointer; font-weight: 700; color: var(--accent); }
-    .smart-search {
-      margin: .75rem 0 1rem; padding: 1rem; border-radius: 16px;
-      border: 1px dashed rgba(15,138,106,.35); background: rgba(15,138,106,.06);
+    .btn-auto-discover {
+      background: linear-gradient(135deg, #10231f 0%, #0f8a6a 100%);
+      color: #e8ff57; font-weight: 800;
     }
+    .auto-discover-banner {
+      margin: 0 0 .75rem; padding: .85rem 1rem; border-radius: 14px;
+      border: 1px solid rgba(232,255,87,.45);
+      background: linear-gradient(120deg, rgba(16,35,31,.94), rgba(15,138,106,.88));
+      color: #f7faf7;
+    }
+    .auto-discover-banner p { margin: .25rem 0 0; font-size: .88rem; opacity: .92; }
     .search-topbar {
       display: flex; gap: .5rem; flex-wrap: wrap; align-items: center;
       position: sticky; top: 0; z-index: 5; padding: .65rem;
@@ -318,6 +325,15 @@ export function renderDashboardPage(storeDomain: string): string {
       </div>
 
       <section id="tab-search" class="panel">
+        <div class="auto-discover-banner">
+          <div style="display:flex;flex-wrap:wrap;gap:.6rem;align-items:center;justify-content:space-between">
+            <div>
+              <strong style="font-size:1.05rem">⚡ اكتشاف تلقائي مبهر</strong>
+              <p>يبحث في 12 كلمات مختلفة تلقائيًا، يدمج النتائج، ويعرض فقط المنتجات القوية (score 72+)</p>
+            </div>
+            <button class="btn btn-auto-discover" id="autoDiscoverBtn" type="button">ابدأ الاكتشاف (1–2 دقيقة)</button>
+          </div>
+        </div>
         <div class="search-topbar">
           <select id="category" title="الفئة — مطلوب للبحث الذكي">${categoryOptions}</select>
           <input id="query" type="search" placeholder="كلمات إضافية داخل الفئة (اختياري)…" />
@@ -335,7 +351,7 @@ export function renderDashboardPage(storeDomain: string): string {
           <button class="btn btn-accent" id="searchBtn" type="button">بحث</button>
         </div>
         <div id="presetTip" class="hidden"></div>
-        <p class="hint" id="aiStatusHint">بحث ذكي يفضّل منتجات صادقة + تميّز + سنة 2026 — 🤖 يقيّم حل المشكلة والهوك</p>
+        <p class="hint" id="aiStatusHint">للنتائج المبهرة: اختر الفئة ثم ⚡ اكتشاف تلقائي — أو البحث الذكي 🥈🥇 للتجربة السريعة</p>
 
         <details class="more" id="advancedFilters">
           <summary>فلاتر متقدمة</summary>
@@ -1053,7 +1069,64 @@ export function renderDashboardPage(storeDomain: string): string {
     }
 
     function itemDiscoveryScore(item) {
+      const final = Number(item.discoverFinalScore);
+      if (Number.isFinite(final) && final > 0) return final;
       return Number(item.discoveryScore) || 0;
+    }
+
+    async function runAutoDiscover() {
+      const category = $("category").value;
+      if (!category) {
+        toast("اختر الفئة أولًا (مثلاً سيارات واكسسوارات) 👆", true);
+        $("category").focus();
+        return;
+      }
+
+      const btn = $("autoDiscoverBtn");
+      btn.disabled = true;
+      const catLabel = $("category").selectedOptions[0]?.textContent || category;
+      showPresetTip("⚡ جاري البحث في عشرات الكلمات تلقائيًا — لا تغلق الصفحة (قد يستغرق دقيقة أو دقيقتين)");
+      $("searchStatus").textContent = "اكتشاف تلقائي في «" + catLabel + "»…";
+      $("filterActions").classList.add("hidden");
+
+      try {
+        const res = await api("/api/discover/auto", {
+          method: "POST",
+          body: JSON.stringify({
+            category,
+            shipToCountry: $("shipToCountry").value,
+            currency: $("currency").value,
+            keywordLimit: 12,
+            minScore: 72,
+            maxResults: 12,
+          }),
+        });
+        const data = res.data || {};
+        state.lastSearch = data;
+        state.lastPreset = "auto-discover";
+        const items = data.results || [];
+
+        $("searchStatus").textContent =
+          "اكتشاف مبهر: " + items.length + " منتج (score ≥ " + (data.minScoreUsed || 72) +
+          ") · فحصنا " + (data.keywordsScanned || 0) + " كلمات · " +
+          (data.totalUnique || 0) + " منتج فريد · " +
+          (data.executionTimeSeconds || 0) + " ثانية" +
+          (data.warning ? (" — " + data.warning) : "");
+
+        $("searchUrlRow").classList.add("hidden");
+        setSearchResults(items);
+
+        if (!items.length) {
+          toast(data.warning || "ما لقينا منتجات مبهرة — جرّب فئة أخرى", true);
+        } else {
+          toast("⚡ " + items.length + " منتج مبهر جاهز للمراجعة");
+        }
+      } catch (e) {
+        $("searchStatus").textContent = "";
+        toast(e.message || "فشل الاكتشاف التلقائي", true);
+      } finally {
+        btn.disabled = false;
+      }
     }
 
     function itemLaunchYear(item) {
@@ -1138,8 +1211,13 @@ export function renderDashboardPage(storeDomain: string): string {
         ).join("");
         const detailLines = buildProductDetailLines(item);
         const flags = [];
-        if (item.discoveryScore != null) {
+        if (item.discoverFinalScore != null) {
+          flags.push('<span class="badge" style="background:#10231f;color:#e8ff57">⭐ ' + escapeHtml(String(item.discoverFinalScore)) + "</span>");
+        } else if (item.discoveryScore != null) {
           flags.push('<span class="badge" style="background:#e8ff57;color:#10231f">🔥 ' + escapeHtml(String(item.discoveryScore)) + "</span>");
+        }
+        if (item.matchedKeyword) {
+          flags.push('<span class="badge">🔎 ' + escapeHtml(item.matchedKeyword) + "</span>");
         }
         if (itemIsSuspicious(item)) {
           flags.push('<span class="badge" style="background:#fee4e2;color:#b42318">⚠️ أرقام مشبوهة</span>');
@@ -1230,6 +1308,7 @@ export function renderDashboardPage(storeDomain: string): string {
       }
     }
     $("searchBtn").onclick = runSearch;
+    $("autoDiscoverBtn").onclick = runAutoDiscover;
     $("query").addEventListener("keydown", (e) => { if (e.key === "Enter") runSearch(); });
 
     $("showRawBtn").onclick = () => {

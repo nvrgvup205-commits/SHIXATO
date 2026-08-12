@@ -1,0 +1,59 @@
+import { Hono } from "hono";
+import { listCategoriesWithKeywords } from "../data/trending-keywords";
+import { AutoDiscoverService } from "../services/auto-discover";
+import type { Env } from "../types";
+import { requireAuth } from "../utils/session";
+import { HttpError } from "../utils/http";
+
+const discover = new Hono<{ Bindings: Env }>();
+
+discover.get("/keywords", requireAuth, (c) => {
+  return c.json({
+    ok: true,
+    data: {
+      categoriesWithKeywords: listCategoriesWithKeywords(),
+      hint: "حدّث src/data/trending-keywords.json أسبوعيًا من Google Trends",
+    },
+  });
+});
+
+/**
+ * اكتشاف تلقائي مبهر — يبحث في عشرات الكلمات، يدمج، يفلتر، يعرض الأفضل فقط.
+ */
+discover.post("/auto", requireAuth, async (c) => {
+  const body = (await c.req.json().catch(() => ({}))) as {
+    category?: string;
+    shipToCountry?: string;
+    currency?: string;
+    keywordLimit?: number;
+    minScore?: number;
+    maxResults?: number;
+  };
+
+  if (!body.category?.trim()) {
+    return c.json({ ok: false, error: "اختر الفئة أولًا" }, 400);
+  }
+
+  try {
+    const data = await new AutoDiscoverService().discover({
+      category: body.category,
+      shipToCountry: body.shipToCountry,
+      currency: body.currency,
+      keywordLimit: body.keywordLimit,
+      minScore: body.minScore,
+      maxResults: body.maxResults,
+    });
+
+    return c.json({ ok: true, data });
+  } catch (err) {
+    if (err instanceof HttpError) {
+      return c.json(
+        { ok: false, error: err.message, details: err.details ?? null },
+        err.status as 400 | 429 | 500 | 502,
+      );
+    }
+    throw err;
+  }
+});
+
+export default discover;

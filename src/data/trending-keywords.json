@@ -1,0 +1,72 @@
+{
+  "cars": [
+    "car organizer",
+    "car seat storage",
+    "trunk organizer",
+    "car phone mount",
+    "seatbelt organizer",
+    "car cable organizer",
+    "car cup holder expander",
+    "car dashboard organizer",
+    "car sun shade holder",
+    "car door pocket organizer",
+    "car hanging organizer",
+    "car storage box",
+    "car armrest organizer",
+    "car console organizer",
+    "car visor organizer",
+    "car under seat organizer",
+    "car seat gap filler",
+    "car floor mat organizer",
+    "car rear seat organizer",
+    "backseat car organizer"
+  ],
+  "car-electronics": [
+    "car wireless charger mount",
+    "car dash cam holder",
+    "car bluetooth adapter",
+    "car phone holder magnetic",
+    "car usb charger fast",
+    "car ambient led lights",
+    "car tire pressure monitor",
+    "car reverse camera wireless",
+    "car headrest tablet holder",
+    "car vacuum cleaner portable"
+  ],
+  "storage": [
+    "closet organizer",
+    "under bed storage",
+    "drawer organizer",
+    "kitchen cabinet organizer",
+    "bathroom storage rack",
+    "shoe organizer",
+    "wardrobe hanging organizer",
+    "desk cable organizer",
+    "refrigerator organizer bins",
+    "pantry storage containers"
+  ],
+  "home": [
+    "kitchen gadget organizer",
+    "spice rack organizer",
+    "sink caddy organizer",
+    "bathroom corner shelf",
+    "multi function kitchen tool",
+    "food storage vacuum",
+    "pot lid organizer",
+    "under sink organizer",
+    "wall mounted spice rack",
+    "silicone stretch lids"
+  ],
+  "phones": [
+    "phone stand adjustable",
+    "phone grip ring holder",
+    "phone cooling fan",
+    "phone camera lens kit",
+    "phone wallet case slim",
+    "magnetic phone wallet",
+    "phone lanyard strap",
+    "phone tripod mini",
+    "phone screen magnifier",
+    "phone car mount foldable"
+  ]
+}
