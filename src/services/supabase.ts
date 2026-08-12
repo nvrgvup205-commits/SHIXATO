@@ -1,6 +1,7 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import type {
   Env,
+  FavoriteRecord,
   ProductRecord,
   ProductStatus,
   SyncLogRecord,
@@ -31,6 +32,16 @@ export type CreateSyncLogInput = {
   request_payload?: Record<string, unknown> | null;
   response_payload?: Record<string, unknown> | null;
   error_message?: string | null;
+};
+
+export type UpsertFavoriteInput = {
+  aliexpress_id: string;
+  title: string;
+  original_price: number;
+  currency: string;
+  listing: Record<string, unknown>;
+  notes?: string | null;
+  preset_grade?: string | null;
 };
 
 /** Independent Postgres schema — must be listed under Exposed schemas in Supabase API settings */
@@ -203,6 +214,62 @@ export class SupabaseService {
 
     if (error) {
       throw new HttpError(500, "Failed to save setting", error);
+    }
+  }
+
+  async upsertFavorite(input: UpsertFavoriteInput): Promise<FavoriteRecord> {
+    const { data, error } = await this.client
+      .from("favorites")
+      .upsert(
+        {
+          ...input,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: "aliexpress_id" },
+      )
+      .select("*")
+      .single();
+
+    if (error) {
+      throw new HttpError(500, "Failed to save favorite", error);
+    }
+
+    return data as FavoriteRecord;
+  }
+
+  async listFavorites(limit = 100): Promise<FavoriteRecord[]> {
+    const { data, error } = await this.client
+      .from("favorites")
+      .select("*")
+      .order("created_at", { ascending: false })
+      .limit(limit);
+
+    if (error) {
+      throw new HttpError(500, "Failed to list favorites", error);
+    }
+
+    return (data as FavoriteRecord[]) ?? [];
+  }
+
+  async getFavorite(id: string): Promise<FavoriteRecord | null> {
+    const { data, error } = await this.client
+      .from("favorites")
+      .select("*")
+      .eq("id", id)
+      .maybeSingle();
+
+    if (error) {
+      throw new HttpError(500, "Failed to fetch favorite", error);
+    }
+
+    return (data as FavoriteRecord | null) ?? null;
+  }
+
+  async deleteFavorite(id: string): Promise<void> {
+    const { error } = await this.client.from("favorites").delete().eq("id", id);
+
+    if (error) {
+      throw new HttpError(500, "Failed to delete favorite", error);
     }
   }
 }

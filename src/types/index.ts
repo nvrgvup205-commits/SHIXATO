@@ -72,6 +72,19 @@ export interface ProductRecord {
   updated_at?: string | null;
 }
 
+export interface FavoriteRecord {
+  id: string;
+  aliexpress_id: string;
+  title: string;
+  original_price: number;
+  currency: string;
+  listing: AliExpressListing | Record<string, unknown>;
+  notes?: string | null;
+  preset_grade?: string | null;
+  created_at: string;
+  updated_at?: string | null;
+}
+
 export interface SyncLogRecord {
   id: string;
   product_id: string | null;

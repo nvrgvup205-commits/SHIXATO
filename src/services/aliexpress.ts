@@ -103,9 +103,12 @@ export class AliExpressService {
       shipToCountry: (filters.shipToCountry || "SA").toUpperCase(),
     };
 
+    const locale = normalized.locale === "en" ? "en" : "ar";
+
     const cookie = this.buildLocaleCookie(
       normalized.currency!,
       normalized.shipToCountry!,
+      locale,
     );
 
     const searchUrl = this.buildSearchUrl(normalized);
@@ -115,6 +118,7 @@ export class AliExpressService {
       html = await this.fetchHtml(searchUrl, {
         allowShort: false,
         cookie,
+        locale,
       });
       if (this.isBlockedPage(html)) throw new Error("blocked");
     } catch {
@@ -130,6 +134,7 @@ export class AliExpressService {
       html = await this.fetchHtml(fallbackUrl, {
         allowShort: false,
         cookie,
+        locale,
       });
       if (this.isBlockedPage(html)) {
         throw new HttpError(
@@ -267,21 +272,29 @@ export class AliExpressService {
     return this.normalize(aliexpressId, url, raw, html);
   }
 
-  private buildLocaleCookie(currency: string, shipToCountry: string): string {
-    // Guides AliExpress SSR toward currency + destination region
-    return `aep_usuc_f=site=glo&c_tp=${encodeURIComponent(currency)}&region=${encodeURIComponent(shipToCountry)}&b_locale=en_US`;
+  private buildLocaleCookie(
+    currency: string,
+    shipToCountry: string,
+    locale: "ar" | "en" = "ar",
+  ): string {
+    const bLocale = locale === "ar" ? "ar_SA" : "en_US";
+    return `aep_usuc_f=site=glo&c_tp=${encodeURIComponent(currency)}&region=${encodeURIComponent(shipToCountry)}&b_locale=${bLocale}`;
   }
 
   private async fetchHtml(
     url: string,
-    options?: { allowShort?: boolean; cookie?: string },
+    options?: { allowShort?: boolean; cookie?: string; locale?: "ar" | "en" },
   ): Promise<string> {
+    const locale = options?.locale === "en" ? "en" : "ar";
     const headers: Record<string, string> = {
       "User-Agent":
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
       Accept:
         "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-      "Accept-Language": "en-US,en;q=0.9,ar;q=0.8",
+      "Accept-Language":
+        locale === "ar"
+          ? "ar-SA,ar;q=0.9,en;q=0.8"
+          : "en-US,en;q=0.9,ar;q=0.8",
       "Cache-Control": "no-cache",
       "Upgrade-Insecure-Requests": "1",
     };
@@ -426,6 +439,8 @@ export class AliExpressService {
     const title =
       this.asString(titleObj?.displayTitle) ||
       this.asString(titleObj?.seoTitle) ||
+      this.asString(titleObj?.title) ||
+      this.asString(item.subject) ||
       `Product ${aliexpressId}`;
 
     const imageObj = item.image as Record<string, unknown> | undefined;

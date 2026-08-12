@@ -13,6 +13,10 @@ export interface ProductSearchFilters {
   /** Category id from PRODUCT_CATEGORIES — used when query is empty */
   category?: string;
   page?: number;
+  /** AliExpress page locale — `ar` returns Arabic titles when available */
+  locale?: "ar" | "en";
+  /** Smart-search preset grade (diagnostics only) */
+  presetGrade?: "starter" | "balanced" | "pro";
 
   /** URL / SSR filters sent to AliExpress */
   sort?: SearchSort;
