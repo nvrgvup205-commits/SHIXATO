@@ -162,6 +162,16 @@ export interface AliExpressListing {
   aiScore?: number;
   /** Override selling price saved while editing favorites */
   sellingPrice?: number;
+  /** Cached AI analysis from dashboard (used when saving to favorites) */
+  aiAnalyzed?: {
+    suggestedTitle?: string;
+    hookAr?: string;
+    adCopyAr?: string;
+    descriptionAr?: string;
+    pros?: string[];
+    score?: number;
+    suggestedSellingPrice?: number;
+  };
 }
 
 export interface AliExpressSearchResult {

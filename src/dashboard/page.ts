@@ -552,7 +552,7 @@ export function renderDashboardPage(storeDomain: string): string {
     </label>
     <div style="display:flex;gap:.55rem;flex-wrap:wrap;margin-top:.8rem">
       <button class="btn btn-accent" id="importBtn" type="button">رفع إلى Shopify</button>
-      <button class="btn btn-ghost" id="favoriteBtn" type="button">⭐ حفظ في المفضلة (بعد 🤖)</button>
+      <button class="btn btn-ghost" id="favoriteBtn" type="button" disabled title="حلّل بالذكاء الاصطناعي أولًا">⭐ حفظ في المفضلة</button>
       <a class="btn btn-ghost" id="openAe" href="#" target="_blank" rel="noopener" style="text-decoration:none;text-align:center">فتح علي إكسبريس</a>
     </div>
     <p class="hint" id="dHint"></p>
@@ -756,20 +756,52 @@ export function renderDashboardPage(storeDomain: string): string {
       });
     }
 
+    function resolveAiForFavorite(listing, aiAnalysis) {
+      if (aiAnalysis?.suggestedTitle?.trim()) return aiAnalysis;
+      const stored = listing?.aiAnalyzed;
+      if (stored?.suggestedTitle?.trim()) return stored;
+      return null;
+    }
+
+    function applyAiToListing(listing, a) {
+      if (!listing || !a) return listing;
+      return {
+        ...listing,
+        titleEn: listing.titleEn || listing.title,
+        aiAnalyzed: a,
+        hookAr: a.hookAr || listing.hookAr,
+        adCopyAr: a.adCopyAr || listing.adCopyAr,
+        descriptionAr: a.descriptionAr || listing.descriptionAr,
+        pros: a.pros || listing.pros,
+        aiScore: a.score ?? listing.aiScore,
+        sellingPrice: a.suggestedSellingPrice ?? listing.sellingPrice,
+      };
+    }
+
+    function updateFavoriteBtnState() {
+      const btn = $("favoriteBtn");
+      const ai = resolveAiForFavorite(state.listing, state.lastAiAnalysis);
+      const ready = Boolean(ai?.suggestedTitle?.trim());
+      btn.disabled = !ready;
+      btn.title = ready ? "حفظ بالعنوان السعودي والهوك" : "اضغط 🤖 حلّل أولًا ثم احفظ";
+    }
+
     async function saveFavorite(listing, presetGrade, aiAnalysis) {
-      if (!aiAnalysis?.suggestedTitle) {
-        throw new Error("حلّل بالذكاء الاصطناعي أولًا 🤖 — الترجمة السعودية مع المفضلة فقط");
+      const ai = resolveAiForFavorite(listing, aiAnalysis);
+      if (!ai?.suggestedTitle?.trim()) {
+        throw new Error("اضغط 🤖 حلّل بالذكاء الاصطناعي أولًا — بعدها يتفعّل زر المفضلة");
       }
       const enriched = {
         ...listing,
         titleEn: listing.titleEn || listing.title,
-        title: aiAnalysis.suggestedTitle,
-        hookAr: aiAnalysis.hookAr || undefined,
-        adCopyAr: aiAnalysis.adCopyAr || undefined,
-        descriptionAr: aiAnalysis.descriptionAr || undefined,
-        pros: aiAnalysis.pros || undefined,
-        aiScore: aiAnalysis.score,
-        sellingPrice: aiAnalysis.suggestedSellingPrice || undefined,
+        title: ai.suggestedTitle.trim(),
+        hookAr: ai.hookAr || undefined,
+        adCopyAr: ai.adCopyAr || undefined,
+        descriptionAr: ai.descriptionAr || undefined,
+        pros: ai.pros || undefined,
+        aiScore: ai.score,
+        sellingPrice: ai.suggestedSellingPrice ?? listing.sellingPrice,
+        aiAnalyzed: ai,
       };
       await api("/api/favorites", {
         method: "POST",
@@ -777,15 +809,15 @@ export function renderDashboardPage(storeDomain: string): string {
           listing: enriched,
           presetGrade: presetGrade || null,
           aiAnalysis: {
-            suggestedTitle: aiAnalysis.suggestedTitle,
-            hookAr: aiAnalysis.hookAr,
-            adCopyAr: aiAnalysis.adCopyAr,
-            descriptionAr: aiAnalysis.descriptionAr,
-            pros: aiAnalysis.pros,
-            score: aiAnalysis.score,
-            suggestedSellingPrice: aiAnalysis.suggestedSellingPrice,
+            suggestedTitle: ai.suggestedTitle,
+            hookAr: ai.hookAr,
+            adCopyAr: ai.adCopyAr,
+            descriptionAr: ai.descriptionAr,
+            pros: ai.pros,
+            score: ai.score,
+            suggestedSellingPrice: ai.suggestedSellingPrice,
           },
-          notes: aiAnalysis.adCopyAr || aiAnalysis.hookAr || null,
+          notes: ai.adCopyAr || ai.hookAr || null,
         }),
       });
     }
@@ -1109,12 +1141,14 @@ export function renderDashboardPage(storeDomain: string): string {
       $("dAiPanel").innerHTML = "";
       $("drawer").classList.add("open");
       $("backdrop").classList.add("open");
+      updateFavoriteBtnState();
     }
     function closeDrawer() {
       $("drawer").classList.remove("open");
       $("backdrop").classList.remove("open");
       state.listing = null;
       state.lastAiAnalysis = null;
+      updateFavoriteBtnState();
     }
     $("closeDrawer").onclick = closeDrawer;
     $("backdrop").onclick = closeDrawer;
@@ -1136,6 +1170,8 @@ export function renderDashboardPage(storeDomain: string): string {
         });
         const a = res.data || {};
         state.lastAiAnalysis = a;
+        state.listing = applyAiToListing(state.listing, a);
+        updateFavoriteBtnState();
         const pros = (a.pros || []).map((x) => "<li>✅ " + escapeHtml(x) + "</li>").join("");
         const cons = (a.cons || []).map((x) => "<li>⚠️ " + escapeHtml(x) + "</li>").join("");
         panel.innerHTML =
@@ -1151,8 +1187,8 @@ export function renderDashboardPage(storeDomain: string): string {
           (cons ? ("<ul>" + cons + "</ul>") : "") +
           '<div class="sub">' + (a.aiEnabled ? "Workers AI — اضغط ⭐ لحفظ العنوان في المفضلة" : "تحليل تلقائي (فعّل Workers AI)") + "</div>";
         if (a.suggestedSellingPrice) $("dSell").value = String(a.suggestedSellingPrice);
-        $("dHint").textContent = "تم التحليل ✅ — اضغط ⭐ حفظ في المفضلة بالعنوان السعودي";
-        toast("تم التحليل — جاهز للحفظ في المفضلة");
+        $("dHint").textContent = "تم التحليل ✅ — زر ⭐ المفضلة اتفعّل، اضغطه للحفظ";
+        toast("تم التحليل — زر المفضلة جاهز");
       } catch (e) {
         panel.innerHTML = escapeHtml(e.message || "فشل التحليل");
         toast(e.message || "فشل التحليل", true);
@@ -1176,10 +1212,11 @@ export function renderDashboardPage(storeDomain: string): string {
           }),
         });
         if ($("dAlsoFavorite").checked) {
-          if (!state.lastAiAnalysis?.suggestedTitle) {
+          const ai = resolveAiForFavorite(state.listing, state.lastAiAnalysis);
+          if (!ai?.suggestedTitle) {
             toast("حلّل بالذكاء الاصطناعي أولًا قبل الإضافة للمفضلة", true);
           } else {
-            await saveFavorite(state.listing, state.lastPreset, state.lastAiAnalysis);
+            await saveFavorite(state.listing, state.lastPreset, ai);
           }
         }
         toast(res.data && res.data.synced ? "تم الرفع إلى Shopify" : "تم الحفظ بدون مزامنة كاملة");
