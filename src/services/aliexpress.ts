@@ -22,6 +22,25 @@ import {
  * PDP scrape is best-effort; callers can fall back to listing cards.
  */
 export class AliExpressService {
+  private static readonly SHIPPING_METHOD_LABELS: Record<string, string> = {
+    sea: "AliExpress Standard Shipping",
+    air: "AliExpress Saver Shipping",
+    premium: "AliExpress Premium Shipping",
+    express: "AliExpress Premium Shipping",
+    cainiao: "Cainiao Super Economy",
+    local: "Local delivery",
+  };
+
+  private static readonly SHIP_TO_CURRENCY: Record<string, string> = {
+    SA: "SAR",
+    AE: "AED",
+    US: "USD",
+    GB: "GBP",
+    DE: "EUR",
+    FR: "EUR",
+    EG: "EGP",
+  };
+
   buildProductUrl(aliexpressId: string): string {
     return canonicalAliExpressProductUrl(aliexpressId);
   }
@@ -410,7 +429,9 @@ export class AliExpressService {
       `Product ${aliexpressId}`;
 
     const imageObj = item.image as Record<string, unknown> | undefined;
-    const image = this.normalizeImageUrl(this.asString(imageObj?.imgUrl));
+    const primaryImage = this.normalizeImageUrl(this.asString(imageObj?.imgUrl));
+    const cardImages = this.collectSearchCardImages(item, primaryImage);
+    const image = cardImages[0] || "";
 
     const prices = item.prices as Record<string, unknown> | undefined;
     const salePrice = prices?.salePrice as Record<string, unknown> | undefined;
@@ -462,7 +483,26 @@ export class AliExpressService {
 
     const badges = this.extractBadges(item);
     const isChoice = badges.some((b) => /choice/i.test(b));
-    const isFreeShipping = badges.some((b) => /free\s*shipping/i.test(b));
+
+    const sellingPoints =
+      (item.sellingPoints as Array<Record<string, unknown>> | undefined) ?? [];
+    const shippingSp = this.parseShippingFromSellingPoints(sellingPoints);
+    const tracePdp = this.parseTracePdp(item);
+
+    const isFreeShipping =
+      shippingSp.shippingType === "free" ||
+      shippingSp.shippingType === "conditional_free" ||
+      badges.some((b) => /free\s*shipping/i.test(b));
+
+    let shippingType = shippingSp.shippingType;
+    if (
+      shippingType === "unknown" &&
+      tracePdp.shippingCost != null &&
+      tracePdp.shippingCost > 0
+    ) {
+      shippingType = "paid";
+    }
+
     const isViral =
       badges.some((b) => /viral|trending|hot|bestseller|top/i.test(b)) ||
       (soldCount != null && soldCount >= 1000);
@@ -479,6 +519,7 @@ export class AliExpressService {
       this.buildProductUrl(aliexpressId);
 
     const shipFrom =
+      tracePdp.shipFrom ||
       this.asString(extra?.shipFrom) ||
       this.asString(extra?.ship_from) ||
       undefined;
@@ -488,7 +529,7 @@ export class AliExpressService {
       title,
       url,
       image,
-      images: image ? [image] : [],
+      images: cardImages,
       originalPrice: sale,
       listPrice: Number.isFinite(listPrice) && listPrice > 0 ? listPrice : undefined,
       currency,
@@ -503,7 +544,167 @@ export class AliExpressService {
       isFreeShipping,
       isViral,
       shipFrom,
+      shipTo: tracePdp.shipTo,
+      shippingMethod: tracePdp.methodLabel,
+      shippingMethodCode: tracePdp.methodCode,
+      shippingCarrier: tracePdp.carrier,
+      deliveryEstimate: shippingSp.deliveryEstimate,
+      shippingType,
+      shippingNote: shippingSp.shippingNote,
+      shippingCost: tracePdp.shippingCost,
+      shippingCostCurrency: tracePdp.shippingCostCurrency,
+      isLocalWarehouse: shippingSp.isLocalWarehouse,
+      storeLaunchDate: this.asString(item.lunchTime) || undefined,
     };
+  }
+
+  private collectSearchCardImages(
+    item: Record<string, unknown>,
+    primary?: string,
+  ): string[] {
+    const out: string[] = [];
+    if (primary) out.push(primary);
+
+    const imagesArr = item.images as Array<Record<string, unknown>> | undefined;
+    if (Array.isArray(imagesArr)) {
+      for (const img of imagesArr) {
+        const url = this.normalizeImageUrl(this.asString(img.imgUrl));
+        if (url) out.push(url);
+      }
+    }
+
+    const imageObj = item.image as Record<string, unknown> | undefined;
+    const main = this.normalizeImageUrl(this.asString(imageObj?.imgUrl));
+    if (main) out.push(main);
+
+    return [...new Set(out.filter(Boolean))];
+  }
+
+  private parseShippingFromSellingPoints(
+    points: Array<Record<string, unknown>>,
+  ): {
+    shippingType: "free" | "conditional_free" | "paid" | "unknown";
+    shippingNote?: string;
+    deliveryEstimate?: string;
+    isLocalWarehouse?: boolean;
+  } {
+    let shippingType: "free" | "conditional_free" | "paid" | "unknown" =
+      "unknown";
+    let shippingNote: string | undefined;
+    let deliveryEstimate: string | undefined;
+    let isLocalWarehouse = false;
+
+    for (const sp of points) {
+      const source = this.asString(sp.source);
+      const text = this.asString(
+        (sp.tagContent as Record<string, unknown> | undefined)?.tagText,
+      );
+
+      if (source === "ETA_atm" && text) {
+        deliveryEstimate = text;
+      }
+      if (source === "Free_Shipping_atm") {
+        shippingType = "free";
+        shippingNote = text || "Free shipping";
+      }
+      if (source === "platformFreeShipping_atm") {
+        if (shippingType !== "free") shippingType = "conditional_free";
+        shippingNote = text || shippingNote;
+      }
+      if (source === "localplus_flag") {
+        isLocalWarehouse = true;
+      }
+    }
+
+    return {
+      shippingType,
+      shippingNote,
+      deliveryEstimate,
+      isLocalWarehouse,
+    };
+  }
+
+  private parseTracePdp(item: Record<string, unknown>): {
+    shipFrom?: string;
+    shipTo?: string;
+    methodCode?: string;
+    methodLabel?: string;
+    carrier?: string;
+    shippingCost?: number;
+    shippingCostCurrency?: string;
+  } {
+    const trace = item.trace as Record<string, unknown> | undefined;
+    const pdp = trace?.pdpParams as Record<string, unknown> | undefined;
+    if (!pdp) return {};
+
+    let shipFrom: string | undefined;
+    const cdi = this.asString(pdp.pdp_cdi);
+    if (cdi) {
+      try {
+        const parsed = JSON.parse(decodeURIComponent(cdi)) as Record<
+          string,
+          unknown
+        >;
+        const from = this.asString(parsed.shipFrom);
+        if (from) shipFrom = from.toUpperCase();
+      } catch {
+        // ignore malformed trace blob
+      }
+    }
+
+    const npiRaw = this.asString(pdp.pdp_npi);
+    if (!npiRaw) return { shipFrom };
+
+    const npi = decodeURIComponent(npiRaw);
+    const logisticsMatch = npi.match(
+      /!@([^!]+)!([^!]+)!([^!]+)!([^!]+)!(\d)!([^!]+)!/i,
+    );
+    if (!logisticsMatch) return { shipFrom };
+
+    const preParts = npi.slice(0, logisticsMatch.index).split("!");
+    const methodCode = this.asString(logisticsMatch[3]).toLowerCase();
+    const shipToRaw = this.asString(logisticsMatch[4]);
+    const shipTo =
+      shipToRaw.length === 2 ? shipToRaw.toUpperCase() : shipToRaw || undefined;
+    const carrier = this.asString(logisticsMatch[6]) || undefined;
+
+    const priceCurrency = this.asString(preParts[1]).toUpperCase();
+    const shippingCost = this.extractNpiShippingCost(preParts);
+
+    let shippingCostValue: number | undefined;
+    let shippingCostCurrency: string | undefined;
+    if (shippingCost != null && shippingCost > 0) {
+      shippingCostValue = shippingCost;
+      shippingCostCurrency =
+        (shipTo && AliExpressService.SHIP_TO_CURRENCY[shipTo]) ||
+        priceCurrency ||
+        undefined;
+    }
+
+    const methodLabel =
+      (methodCode && AliExpressService.SHIPPING_METHOD_LABELS[methodCode]) ||
+      methodCode ||
+      undefined;
+
+    return {
+      shipFrom,
+      shipTo,
+      methodCode: methodCode || undefined,
+      methodLabel,
+      carrier,
+      shippingCost: shippingCostValue,
+      shippingCostCurrency,
+    };
+  }
+
+  /** Last positive amount in the npi price segment ≈ shipping in destination currency */
+  private extractNpiShippingCost(preParts: string[]): number | undefined {
+    const nums = preParts
+      .slice(2)
+      .map((part) => Number(part))
+      .filter((n) => Number.isFinite(n) && n > 0);
+    if (nums.length < 2) return undefined;
+    return nums[nums.length - 1];
   }
 
   private extractBadges(item: Record<string, unknown>): string[] {

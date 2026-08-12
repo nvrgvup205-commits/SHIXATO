@@ -93,6 +93,12 @@ export interface AiFilterResult {
   tags?: string[];
 }
 
+export type AliExpressShippingType =
+  | "free"
+  | "conditional_free"
+  | "paid"
+  | "unknown";
+
 /** Search-result card used when PDP scrape is blocked */
 export interface AliExpressListing {
   aliexpressId: string;
@@ -117,6 +123,21 @@ export interface AliExpressListing {
   isFreeShipping?: boolean;
   isViral?: boolean;
   shipFrom?: string;
+  /** Destination country ISO-2 from search card trace */
+  shipTo?: string;
+  /** Human label e.g. AliExpress Standard Shipping */
+  shippingMethod?: string;
+  shippingMethodCode?: string;
+  shippingCarrier?: string;
+  /** e.g. Delivery: Aug 18 - 23 */
+  deliveryEstimate?: string;
+  shippingType?: AliExpressShippingType;
+  /** Free shipping note from AE selling point */
+  shippingNote?: string;
+  shippingCost?: number;
+  shippingCostCurrency?: string;
+  isLocalWarehouse?: boolean;
+  storeLaunchDate?: string;
 }
 
 export interface AliExpressSearchResult {
