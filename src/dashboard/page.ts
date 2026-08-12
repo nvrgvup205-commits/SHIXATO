@@ -329,7 +329,7 @@ export function renderDashboardPage(storeDomain: string): string {
           <div style="display:flex;flex-wrap:wrap;gap:.6rem;align-items:center;justify-content:space-between">
             <div>
               <strong style="font-size:1.05rem">⚡ اكتشاف تلقائي مبهر</strong>
-              <p>يبحث في 12 كلمات مختلفة تلقائيًا، يدمج النتائج، ويعرض فقط المنتجات القوية (score 72+)</p>
+              <p>Workers AI يولّد 15 كلمة ترندي لأي فئة تلقائيًا، يبحث فيها، ويعرض فقط score 75+</p>
             </div>
             <button class="btn btn-auto-discover" id="autoDiscoverBtn" type="button">ابدأ الاكتشاف (1–2 دقيقة)</button>
           </div>
@@ -351,7 +351,7 @@ export function renderDashboardPage(storeDomain: string): string {
           <button class="btn btn-accent" id="searchBtn" type="button">بحث</button>
         </div>
         <div id="presetTip" class="hidden"></div>
-        <p class="hint" id="aiStatusHint">للنتائج المبهرة: اختر الفئة ثم ⚡ اكتشاف تلقائي — أو البحث الذكي 🥈🥇 للتجربة السريعة</p>
+        <p class="hint" id="aiStatusHint">⚡ اكتشاف تلقائي: AI يولّد الكلمات + بحث + فلترة 75+ — أي فئة من الـ54</p>
 
         <details class="more" id="advancedFilters">
           <summary>فلاتر متقدمة</summary>
@@ -1096,8 +1096,8 @@ export function renderDashboardPage(storeDomain: string): string {
             category,
             shipToCountry: $("shipToCountry").value,
             currency: $("currency").value,
-            keywordLimit: 12,
-            minScore: 72,
+            keywordLimit: 15,
+            minScore: 75,
             maxResults: 12,
           }),
         });
@@ -1107,8 +1107,9 @@ export function renderDashboardPage(storeDomain: string): string {
         const items = data.results || [];
 
         $("searchStatus").textContent =
-          "اكتشاف مبهر: " + items.length + " منتج (score ≥ " + (data.minScoreUsed || 72) +
-          ") · فحصنا " + (data.keywordsScanned || 0) + " كلمات · " +
+          "اكتشاف مبهر: " + items.length + " منتج (score ≥ " + (data.minScoreUsed || 75) +
+          ") · " + (data.keywordSource === "workers-ai" ? "كلمات AI" : "كلمات احتياطية") +
+          " · فحصنا " + (data.keywordsScanned || 0) + " كلمات · " +
           (data.totalUnique || 0) + " منتج فريد · " +
           (data.executionTimeSeconds || 0) + " ثانية" +
           (data.warning ? (" — " + data.warning) : "");
