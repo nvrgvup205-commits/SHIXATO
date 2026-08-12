@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { DROPSHIP_PRESETS, buildPresetSearch, type DropshipGrade } from "../data/dropship-presets";
 import { ImportPipeline } from "../services/pipeline";
-import type { Env, ImportProductInput } from "../types";
+import type { AliExpressListing, Env, ImportProductInput } from "../types";
 import { requireAuth } from "../utils/session";
 import { HttpError } from "../utils/http";
 
@@ -70,6 +70,15 @@ favorites.post("/", requireAuth, async (c) => {
     listing?: ImportProductInput["listing"];
     notes?: string;
     presetGrade?: string;
+    aiAnalysis?: {
+      suggestedTitle?: string;
+      hookAr?: string;
+      adCopyAr?: string;
+      descriptionAr?: string;
+      pros?: string[];
+      score?: number;
+      suggestedSellingPrice?: number;
+    };
   };
 
   const listing = body.listing;
@@ -77,18 +86,83 @@ favorites.post("/", requireAuth, async (c) => {
     return c.json({ ok: false, error: "listing مع aliexpressId و title مطلوب" }, 400);
   }
 
+  const ai = body.aiAnalysis;
+  if (!ai?.suggestedTitle?.trim()) {
+    return c.json(
+      {
+        ok: false,
+        error: "حلّل بالذكاء الاصطناعي أولًا — الترجمة السعودية تُحفظ مع المفضلة فقط",
+      },
+      400,
+    );
+  }
+
+  const enriched: AliExpressListing = {
+    ...listing,
+    titleEn: listing.titleEn ?? listing.title,
+    title: ai.suggestedTitle.trim(),
+    hookAr: ai.hookAr?.trim() || undefined,
+    adCopyAr: ai.adCopyAr?.trim() || undefined,
+    descriptionAr: ai.descriptionAr?.trim() || undefined,
+    pros: ai.pros?.length ? ai.pros : listing.pros,
+    aiScore: ai.score,
+    sellingPrice: ai.suggestedSellingPrice ?? listing.sellingPrice,
+  };
+
   const pipeline = new ImportPipeline(c.env);
   const row = await pipeline.dbService.upsertFavorite({
-    aliexpress_id: listing.aliexpressId,
-    title: listing.title,
-    original_price: listing.originalPrice ?? 0,
-    currency: listing.currency ?? "USD",
-    listing: listing as unknown as Record<string, unknown>,
-    notes: body.notes ?? null,
+    aliexpress_id: enriched.aliexpressId,
+    title: enriched.title,
+    original_price: enriched.originalPrice ?? 0,
+    currency: enriched.currency ?? "USD",
+    listing: enriched as unknown as Record<string, unknown>,
+    notes: body.notes ?? ai.adCopyAr ?? ai.hookAr ?? null,
     preset_grade: body.presetGrade ?? null,
   });
 
   return c.json({ ok: true, data: row }, 201);
+});
+
+favorites.patch("/:id", requireAuth, async (c) => {
+  const id = c.req.param("id");
+  if (!id) return c.json({ ok: false, error: "id مطلوب" }, 400);
+
+  const body = (await c.req.json().catch(() => ({}))) as {
+    title?: string;
+    hookAr?: string;
+    adCopyAr?: string;
+    descriptionAr?: string;
+    sellingPrice?: number;
+    notes?: string | null;
+  };
+
+  const pipeline = new ImportPipeline(c.env);
+  const fav = await pipeline.dbService.getFavorite(id);
+  if (!fav) return c.json({ ok: false, error: "Not found" }, 404);
+
+  const listing = { ...(fav.listing as AliExpressListing) };
+  if (body.hookAr !== undefined) listing.hookAr = body.hookAr.trim() || undefined;
+  if (body.adCopyAr !== undefined) listing.adCopyAr = body.adCopyAr.trim() || undefined;
+  if (body.descriptionAr !== undefined) {
+    listing.descriptionAr = body.descriptionAr.trim() || undefined;
+  }
+  if (body.sellingPrice !== undefined) {
+    listing.sellingPrice =
+      Number.isFinite(body.sellingPrice) && body.sellingPrice > 0
+        ? body.sellingPrice
+        : undefined;
+  }
+
+  const title = body.title?.trim() || fav.title;
+  listing.title = title;
+
+  const row = await pipeline.dbService.updateFavorite(id, {
+    title,
+    notes: body.notes !== undefined ? body.notes : fav.notes,
+    listing: listing as unknown as Record<string, unknown>,
+  });
+
+  return c.json({ ok: true, data: row });
 });
 
 favorites.delete("/:id", requireAuth, async (c) => {
@@ -111,13 +185,19 @@ favorites.post("/:id/import", requireAuth, async (c) => {
   const fav = await pipeline.dbService.getFavorite(id);
   if (!fav) return c.json({ ok: false, error: "Not found" }, 404);
 
-  const listing = fav.listing as ImportProductInput["listing"];
+  const listing = fav.listing as AliExpressListing;
+  const sellingPrice =
+    body.sellingPrice ??
+    (Number.isFinite(listing.sellingPrice) && listing.sellingPrice! > 0
+      ? listing.sellingPrice
+      : undefined);
+
   try {
     const result = await pipeline.importProduct({
       aliexpressId: fav.aliexpress_id,
       listing,
       force: body.force ?? true,
-      sellingPrice: body.sellingPrice,
+      sellingPrice,
     });
     return c.json({ ok: true, data: result }, result.synced ? 201 : 200);
   } catch (err) {

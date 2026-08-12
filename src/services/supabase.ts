@@ -242,13 +242,48 @@ export class SupabaseService {
       .from("favorites")
       .select("*")
       .order("created_at", { ascending: false })
-      .limit(limit);
+      .limit(Math.max(limit, 200));
 
     if (error) {
       throw new HttpError(500, "Failed to list favorites", error);
     }
 
-    return (data as FavoriteRecord[]) ?? [];
+    const rows = (data as FavoriteRecord[]) ?? [];
+    return rows
+      .sort((a, b) => {
+        const sa = Number((a.listing as { aiScore?: number })?.aiScore ?? 0);
+        const sb = Number((b.listing as { aiScore?: number })?.aiScore ?? 0);
+        if (sb !== sa) return sb - sa;
+        return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+      })
+      .slice(0, limit);
+  }
+
+  async updateFavorite(
+    id: string,
+    input: {
+      title?: string;
+      notes?: string | null;
+      listing?: Record<string, unknown>;
+    },
+  ): Promise<FavoriteRecord> {
+    const { data, error } = await this.client
+      .from("favorites")
+      .update({
+        ...(input.title != null ? { title: input.title } : {}),
+        ...(input.notes !== undefined ? { notes: input.notes } : {}),
+        ...(input.listing != null ? { listing: input.listing } : {}),
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", id)
+      .select("*")
+      .single();
+
+    if (error) {
+      throw new HttpError(500, "Failed to update favorite", error);
+    }
+
+    return data as FavoriteRecord;
   }
 
   async getFavorite(id: string): Promise<FavoriteRecord | null> {

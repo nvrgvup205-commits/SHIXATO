@@ -96,9 +96,9 @@ export class ShopifyService {
       product: {
         title: product.title,
         descriptionHtml: product.descriptionHtml,
-        vendor: "AliExpress",
-        productType: product.category ?? "Imported",
-        tags: ["aliexpress", `ae:${product.aliexpressId}`, ...tags],
+        vendor: "شيكساتو",
+        productType: product.category ?? "منتجات مستوردة",
+        tags: ["aliexpress", "عربي", `ae:${product.aliexpressId}`, ...tags],
         status: "ACTIVE",
         // Single default variant price; multi-variant expansion can be layered later
       },
