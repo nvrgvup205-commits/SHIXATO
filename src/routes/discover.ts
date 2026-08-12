@@ -12,7 +12,7 @@ discover.get("/keywords", requireAuth, (c) => {
     ok: true,
     data: {
       categoriesWithKeywords: listCategoriesWithKeywords(),
-      hint: "حدّث src/data/trending-keywords.json أسبوعيًا من Google Trends",
+      hint: "الكلمات تُولَّد تلقائيًا ب Workers AI عند كل اكتشاف (استدعاء واحد خفيف)",
     },
   });
 });
@@ -42,6 +42,7 @@ discover.post("/auto", requireAuth, async (c) => {
       keywordLimit: body.keywordLimit,
       minScore: body.minScore,
       maxResults: body.maxResults,
+      env: c.env,
     });
 
     return c.json({ ok: true, data });

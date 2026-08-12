@@ -1,7 +1,6 @@
-import { getTrendingKeywords } from "../data/trending-keywords";
 import { findCategory } from "../data/categories";
 import { DISCOVERY_EXCLUDES } from "../data/dropship-presets";
-import type { AliExpressListing, ProductSearchFilters } from "../types";
+import type { AliExpressListing, Env, ProductSearchFilters } from "../types";
 import { HttpError } from "../utils/http";
 import {
   delayBeforeRequest,
@@ -13,6 +12,7 @@ import {
   passesImpressiveGate,
   type DiscoverScoreBreakdown,
 } from "./discover-scoring";
+import { KeywordGeneratorService, type KeywordSource } from "./keyword-generator";
 
 export interface ScoredDiscoverListing extends AliExpressListing {
   discoverFinalScore: number;
@@ -24,20 +24,22 @@ export interface AutoDiscoverOptions {
   category: string;
   shipToCountry?: string;
   currency?: string;
-  /** How many keywords to scan (default 12, max 20) */
+  /** How many keywords to scan (default 15, max 20) */
   keywordLimit?: number;
-  /** Minimum final score (default 72) */
+  /** Minimum final score (default 75) */
   minScore?: number;
   /** Max products returned (default 12) */
   maxResults?: number;
-  /** Fallback min score if too few pass primary cutoff */
+  /** Fallback min score if too few pass primary cutoff (default 70) */
   fallbackMinScore?: number;
+  env?: Env;
 }
 
 export interface AutoDiscoverResult {
   categoryId: string;
   categoryLabelAr?: string;
   keywordsUsed: string[];
+  keywordSource?: KeywordSource;
   keywordsScanned: number;
   totalRaw: number;
   totalUnique: number;
@@ -82,14 +84,28 @@ export class AutoDiscoverService {
       throw new HttpError(400, "فئة غير معروفة: " + categoryId);
     }
 
-    const keywordLimit = Math.min(Math.max(options.keywordLimit ?? 12, 3), 20);
-    const minScore = options.minScore ?? 72;
-    const fallbackMinScore = options.fallbackMinScore ?? 65;
+    const keywordLimit = Math.min(Math.max(options.keywordLimit ?? 15, 10), 20);
+    const minScore = options.minScore ?? 75;
+    const fallbackMinScore = options.fallbackMinScore ?? 70;
     const maxResults = Math.min(Math.max(options.maxResults ?? 12, 3), 20);
 
-    const keywords = getTrendingKeywords(categoryId, keywordLimit);
-    if (!keywords.length) {
-      throw new HttpError(400, "لا توجد كلمات بحث لهذه الفئة");
+    let keywords: string[] = [];
+    let keywordSource: KeywordSource = "generated";
+
+    if (options.env) {
+      const kw = await new KeywordGeneratorService(options.env).forCategory(
+        categoryId,
+        keywordLimit,
+      );
+      keywords = kw.keywords;
+      keywordSource = kw.source;
+    }
+
+    if (keywords.length < 8) {
+      throw new HttpError(
+        502,
+        "تعذّر توليد كلمات بحث — تأكد من تفعيل Workers AI في wrangler.toml",
+      );
     }
 
     const shipTo = (options.shipToCountry || "SA").toUpperCase();
@@ -167,7 +183,7 @@ export class AutoDiscoverService {
       .filter((item) => passesImpressiveGate(item, minScore, CURRENT_YEAR))
       .sort((a, b) => b.discoverFinalScore - a.discoverFinalScore);
 
-    if (passed.length < 3) {
+    if (passed.length < 2) {
       minScoreUsed = fallbackMinScore;
       passed = all
         .filter((item) => passesImpressiveGate(item, fallbackMinScore, CURRENT_YEAR))
@@ -179,7 +195,7 @@ export class AutoDiscoverService {
     let warning: string | undefined;
     if (!results.length) {
       warning =
-        "ما لقينا منتجات مبهرة اليوم — جرّب فئة أخرى أو حدّث كلمات البحث في trending-keywords.json";
+        "ما لقينا منتجات بscore " + minScore + "+ — جرّب فئة أخرى أو أعد المحاولة لاحقًا";
     } else if (minScoreUsed < minScore) {
       warning =
         `يوم أضعف — عرضنا أفضل ${results.length} منتج (score ≥ ${minScoreUsed}) بدل ${minScore}`;
@@ -194,6 +210,7 @@ export class AutoDiscoverService {
       categoryId,
       categoryLabelAr: cat.labelAr,
       keywordsUsed: keywords,
+      keywordSource,
       keywordsScanned: scanned,
       totalRaw,
       totalUnique: all.length,
