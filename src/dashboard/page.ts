@@ -319,6 +319,11 @@ export function renderDashboardPage(storeDomain: string): string {
 
         <p class="hint">نصيحة: ابدأ بفئة + ترتيب فقط، ولو ما في نتائج خفّف «كلمات يجب أن تظهر» وعدد التقييمات/المبيعات — كثير من الفلاتر المحلية تستبعد كل البطاقات.</p>
         <div id="searchStatus" class="hint"></div>
+        <div id="searchUrlRow" class="hidden" style="margin:.35rem 0">
+          <a class="btn btn-ghost" id="openSearchAe" href="#" target="_blank" rel="noopener" style="text-decoration:none;font-size:.85rem">
+            فتح رابط البحث على علي إكسبريس (مع الفلاتر)
+          </a>
+        </div>
         <div id="filterActions" class="hidden" style="margin:.5rem 0">
           <button class="btn btn-ghost" id="showRawBtn" type="button">عرض النتائج بدون فلتر محلي</button>
           <button class="btn btn-ghost" id="clearLocalFiltersBtn" type="button">مسح الفلاتر المحلية القاسية</button>
@@ -525,6 +530,12 @@ export function renderDashboardPage(storeDomain: string): string {
         .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
     }
 
+    function aeProductUrl(item) {
+      const id = item.aliexpressId || "";
+      if (item.url && item.url.indexOf("/item/") >= 0) return item.url;
+      return "https://www.aliexpress.com/item/" + id + ".html";
+    }
+
     function renderResults(items) {
       const root = $("results");
       root.innerHTML = "";
@@ -576,6 +587,16 @@ export function renderDashboardPage(storeDomain: string): string {
           " بعد الفلتر / " + (data.totalParsed ?? items.length) + " قبل الفلتر المحلي" +
           " · بحث: " + (data.query || "") + via +
           (data.warning ? (" — " + data.warning) : "");
+
+        if (data.searchUrl) {
+          $("searchUrlRow").classList.remove("hidden");
+          $("openSearchAe").href = data.searchUrl;
+          $("openSearchAe").textContent = data.usedFallbackUrl
+            ? "فتح رابط البحث المبسّط على علي إكسبريس (الفلاتر طُبّقت محليًا)"
+            : "فتح رابط البحث على علي إكسبريس (مع الفلاتر)";
+        } else {
+          $("searchUrlRow").classList.add("hidden");
+        }
 
         const wiped = (data.totalParsed > 0 && items.length === 0);
         $("filterActions").classList.toggle("hidden", !wiped && !data.warning);
@@ -651,7 +672,7 @@ export function renderDashboardPage(storeDomain: string): string {
         '<span class="badge">' + escapeHtml(b) + "</span>"
       ).join("");
       $("dSell").value = "";
-      $("openAe").href = item.url || ("https://www.aliexpress.com/item/" + item.aliexpressId + ".html");
+      $("openAe").href = aeProductUrl(item);
       $("dHint").textContent = "الرفع يستخدم بيانات بطاقة البحث + فلاترك. ID: " + item.aliexpressId;
       $("drawer").classList.add("open");
       $("backdrop").classList.add("open");
@@ -702,7 +723,7 @@ export function renderDashboardPage(storeDomain: string): string {
             "<td>" + img + "<strong>" + escapeHtml(p.title) + "</strong></td>" +
             "<td>" + money(p.selling_price) + "</td>" +
             '<td><span class="status ' + escapeHtml(p.status) + '">' + escapeHtml(p.status) + "</span></td>" +
-            '<td><a href="https://www.aliexpress.com/item/' + p.aliexpress_id + '.html" target="_blank" rel="noopener">' +
+            '<td><a href="' + escapeHtml("https://www.aliexpress.com/item/" + p.aliexpress_id + ".html") + '" target="_blank" rel="noopener">' +
             p.aliexpress_id + "</a></td>";
           body.appendChild(tr);
         });

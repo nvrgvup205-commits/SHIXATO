@@ -32,24 +32,55 @@ export async function fetchWithTimeout(
   }
 }
 
+export const ALIEXPRESS_ITEM_HOST = "www.aliexpress.com";
+
+/** Canonical public product page — always `www.aliexpress.com`, never tracking slugs */
+export function canonicalAliExpressProductUrl(aliexpressId: string): string {
+  const id = aliexpressId.replace(/\D/g, "");
+  if (!/^\d{6,20}$/.test(id)) {
+    throw new Error(`Invalid AliExpress product id: ${aliexpressId}`);
+  }
+  return `https://${ALIEXPRESS_ITEM_HOST}/item/${id}.html`;
+}
+
+/** Resolve any AE item URL / id to the canonical product page */
+export function resolveAliExpressProductUrl(
+  rawUrl?: string | null,
+  aliexpressId?: string | null,
+): string | null {
+  const fromId = aliexpressId ? extractAliExpressId(aliexpressId) : null;
+  const fromUrl = rawUrl ? extractAliExpressId(rawUrl) : null;
+  const id = fromId ?? fromUrl;
+  if (!id) return null;
+  return canonicalAliExpressProductUrl(id);
+}
+
 export function extractAliExpressId(input: string): string | null {
-  const trimmed = input.trim();
-  if (/^\d{10,20}$/.test(trimmed)) return trimmed;
+  let trimmed = input.trim();
+  if (/^\d{6,20}$/.test(trimmed)) return trimmed;
+
+  if (trimmed.startsWith("//")) trimmed = `https:${trimmed}`;
+  if (trimmed.startsWith("/item/")) {
+    trimmed = `https://${ALIEXPRESS_ITEM_HOST}${trimmed}`;
+  }
 
   try {
     const url = new URL(trimmed);
-    const fromPath = url.pathname.match(/\/item\/(\d+)\.html/i);
+    const fromPath = url.pathname.match(/\/item\/(\d{6,20})\.html/i);
     if (fromPath?.[1]) return fromPath[1];
 
     const fromQuery =
       url.searchParams.get("productId") ?? url.searchParams.get("id");
-    if (fromQuery && /^\d{10,20}$/.test(fromQuery)) return fromQuery;
+    if (fromQuery && /^\d{6,20}$/.test(fromQuery)) return fromQuery;
   } catch {
     // not a URL
   }
 
-  const loose = trimmed.match(/(\d{10,20})/);
-  return loose?.[1] ?? null;
+  const loose = trimmed.match(/\/item\/(\d{6,20})\.html/i);
+  if (loose?.[1]) return loose[1];
+
+  const digits = trimmed.match(/(\d{10,20})/);
+  return digits?.[1] ?? null;
 }
 
 export function applyMarkup(price: number, markup: number): number {

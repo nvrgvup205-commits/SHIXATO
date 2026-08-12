@@ -122,6 +122,10 @@ export interface AliExpressListing {
 export interface AliExpressSearchResult {
   query: string;
   page: number;
+  /** Full filtered AliExpress wholesale URL (official query params) */
+  searchUrl: string;
+  /** URL actually fetched when AE rejects the full filtered URL */
+  searchUrlUsed?: string;
   filtersApplied: Record<string, unknown>;
   results: AliExpressListing[];
   /** Results before local post-filters (for "show without filters" UX) */

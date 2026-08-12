@@ -26,5 +26,25 @@ describe("AliExpressService.parseSearchHtml", () => {
     expect(rows[0]!.originalPrice).toBe(1.59);
     expect(rows[0]!.soldCount).toBe(100000);
     expect(rows[0]!.rating).toBe(4.9);
+    expect(rows[0]!.url).toBe(
+      "https://www.aliexpress.com/item/1005009960363169.html",
+    );
+  });
+
+  it("canonicalizes productDetailUrl from search cards", () => {
+    const fixture = `
+      <html><script>
+      {"itemList":{"content":[{
+        "productId":"3256812556172654",
+        "productDetailUrl":"//www.aliexpress.us/item/3256812556172654.html?spm=tracking",
+        "title":{"displayTitle":"Case"},
+        "prices":{"salePrice":{"currencyCode":"USD","minPrice":5.34}}
+      }]}
+      </script></html>
+    `;
+    const rows = new AliExpressService().parseSearchHtml(fixture);
+    expect(rows[0]!.url).toBe(
+      "https://www.aliexpress.com/item/3256812556172654.html",
+    );
   });
 });
