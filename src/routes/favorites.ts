@@ -1,9 +1,48 @@
 import { Hono } from "hono";
 import { DROPSHIP_PRESETS, buildPresetSearch, type DropshipGrade } from "../data/dropship-presets";
 import { ImportPipeline } from "../services/pipeline";
+import { hasArabicText } from "../services/workers-ai";
 import type { AliExpressListing, Env, ImportProductInput } from "../types";
 import { requireAuth } from "../utils/session";
 import { HttpError } from "../utils/http";
+
+type FavoriteAiPayload = {
+  suggestedTitle?: string;
+  hookAr?: string;
+  adCopyAr?: string;
+  descriptionAr?: string;
+  pros?: string[];
+  score?: number;
+  suggestedSellingPrice?: number;
+};
+
+function resolveFavoriteAi(
+  listing: AliExpressListing,
+  ai?: FavoriteAiPayload,
+): FavoriteAiPayload | null {
+  if (ai?.suggestedTitle?.trim()) return ai;
+
+  const stored = (listing as AliExpressListing & { aiAnalyzed?: FavoriteAiPayload })
+    .aiAnalyzed;
+  if (stored?.suggestedTitle?.trim()) return stored;
+
+  if (
+    hasArabicText(listing.title) &&
+    (listing.hookAr?.trim() || listing.descriptionAr?.trim())
+  ) {
+    return {
+      suggestedTitle: listing.title.trim(),
+      hookAr: listing.hookAr,
+      adCopyAr: listing.adCopyAr,
+      descriptionAr: listing.descriptionAr,
+      pros: listing.pros,
+      score: listing.aiScore,
+      suggestedSellingPrice: listing.sellingPrice,
+    };
+  }
+
+  return null;
+}
 
 const favorites = new Hono<{ Bindings: Env }>();
 
@@ -70,15 +109,7 @@ favorites.post("/", requireAuth, async (c) => {
     listing?: ImportProductInput["listing"];
     notes?: string;
     presetGrade?: string;
-    aiAnalysis?: {
-      suggestedTitle?: string;
-      hookAr?: string;
-      adCopyAr?: string;
-      descriptionAr?: string;
-      pros?: string[];
-      score?: number;
-      suggestedSellingPrice?: number;
-    };
+    aiAnalysis?: FavoriteAiPayload;
   };
 
   const listing = body.listing;
@@ -86,12 +117,12 @@ favorites.post("/", requireAuth, async (c) => {
     return c.json({ ok: false, error: "listing مع aliexpressId و title مطلوب" }, 400);
   }
 
-  const ai = body.aiAnalysis;
+  const ai = resolveFavoriteAi(listing, body.aiAnalysis);
   if (!ai?.suggestedTitle?.trim()) {
     return c.json(
       {
         ok: false,
-        error: "حلّل بالذكاء الاصطناعي أولًا — الترجمة السعودية تُحفظ مع المفضلة فقط",
+        error: "اضغط 🤖 حلّل بالذكاء الاصطناعي أولًا — بعدها يتفعّل زر المفضلة",
       },
       400,
     );
