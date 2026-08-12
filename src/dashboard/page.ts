@@ -477,20 +477,33 @@ export function renderDashboardPage(storeDomain: string): string {
       $("app").classList.toggle("hidden", !on);
     }
 
+    async function loadLoginHint() {
+      try {
+        const hint = await fetch("/api/auth/hint", { credentials: "include" })
+          .then((r) => r.json())
+          .catch(() => null);
+        if (hint?.ok && hint.data?.hint) {
+          $("loginHint").innerHTML = escapeHtml(hint.data.hint) +
+            " · يمكن لعدة أشخاص الدخول معًا.";
+        }
+        if (hint?.data && !hint.data.supabaseReachable) {
+          $("loginHint").innerHTML +=
+            " <span style=\"color:var(--danger)\">(Supabase غير متصل — استخدم 1111)</span>";
+        }
+      } catch (_) { /* ignore */ }
+    }
+
     async function boot() {
+      await loadLoginHint();
       try {
         const me = await api("/api/auth/me");
         if (me.data && me.data.authenticated) {
           showApp(true);
           return;
         }
-        if (me.data && me.data.pinSource === "supabase") {
-          $("loginHint").innerHTML =
-            "الرقم محفوظ في <strong>Supabase</strong> (قد لا يكون 1111). يمكن لعدة أشخاص الدخول معًا.";
-        }
       } catch (_) {
         $("loginHint").textContent =
-          "تعذّر الاتصال بالخادم — تأكد أن Worker يعمل ثم أعد المحاولة.";
+          "تعذّر الاتصال بالخادم — تأكد أن Worker مُحدَّث ويعمل ثم أعد المحاولة.";
       }
       showApp(false);
     }
@@ -498,12 +511,23 @@ export function renderDashboardPage(storeDomain: string): string {
     async function login() {
       const pin = $("pin").value.trim();
       if (!pin) return toast("اكتب الرقم السري", true);
+      $("loginBtn").disabled = true;
       try {
         await api("/api/auth/login", { method: "POST", body: JSON.stringify({ pin }) });
+        const me = await api("/api/auth/me");
+        if (!me.data || !me.data.authenticated) {
+          toast(
+            "تم قبول الرقم لكن الجلسة لم تُحفظ — امسح كوكيز الموقع أو جرّب متصفح/نافذة خاصة",
+            true,
+          );
+          return;
+        }
         showApp(true);
         toast("تم الدخول — ابحث عن منتجاتك");
       } catch (e) {
         toast(e.message || "فشل الدخول", true);
+      } finally {
+        $("loginBtn").disabled = false;
       }
     }
     $("loginBtn").onclick = login;

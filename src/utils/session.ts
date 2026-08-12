@@ -75,15 +75,30 @@ export function getDashboardPin(env: Env): string {
 
 /** Prefer PIN stored in Supabase; fall back to env DASHBOARD_PIN / 1111 */
 export async function resolveDashboardPin(env: Env): Promise<string> {
+  const stored = await readSupabaseDashboardPin(env);
+  if (stored) return stored;
+  return getEnvDashboardPin(env);
+}
+
+async function readSupabaseDashboardPin(env: Env): Promise<string | null> {
   try {
     const { SupabaseService } = await import("../services/supabase");
     const db = new SupabaseService(env);
     const stored = await db.getSetting("dashboard_pin");
-    if (stored && stored.trim()) return stored.trim();
+    return stored?.trim() ? stored.trim() : null;
   } catch {
-    // Supabase not configured / table missing
+    return null;
   }
-  return getEnvDashboardPin(env);
+}
+
+/** Accept env PIN (wrangler) OR Supabase PIN — avoids lockout when DB pin differs */
+export async function isValidDashboardPin(env: Env, pin: string): Promise<boolean> {
+  const trimmed = pin.trim();
+  if (!trimmed) return false;
+  if (trimmed === getEnvDashboardPin(env)) return true;
+  const stored = await readSupabaseDashboardPin(env);
+  if (stored && trimmed === stored) return true;
+  return false;
 }
 
 export async function issueSessionToken(env: Env): Promise<string> {
@@ -110,7 +125,8 @@ export async function verifySessionToken(
 }
 
 export function setSessionCookie(c: Context<{ Bindings: Env }>, token: string) {
-  const secure = new URL(c.req.url).protocol === "https:";
+  const url = new URL(c.req.url);
+  const secure = url.protocol === "https:";
   setCookie(c, COOKIE, token, {
     httpOnly: true,
     secure,
@@ -118,6 +134,11 @@ export function setSessionCookie(c: Context<{ Bindings: Env }>, token: string) {
     path: "/",
     maxAge: SESSION_DAYS * 24 * 60 * 60,
   });
+  // Some proxies need explicit Set-Cookie on the response object
+  c.header(
+    "Cache-Control",
+    "no-store, no-cache, must-revalidate",
+  );
 }
 
 export function clearSessionCookie(c: Context<{ Bindings: Env }>) {

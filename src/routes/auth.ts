@@ -4,11 +4,13 @@ import { SupabaseService } from "../services/supabase";
 import type { Env } from "../types";
 import {
   clearSessionCookie,
+  isValidDashboardPin,
   issueSessionToken,
   requireAuth,
   resolveDashboardPin,
   setSessionCookie,
   verifySessionToken,
+  getEnvDashboardPin,
 } from "../utils/session";
 import { HttpError } from "../utils/http";
 
@@ -18,15 +20,49 @@ const auth = new Hono<{ Bindings: Env }>();
 auth.post("/login", async (c) => {
   const body = (await c.req.json().catch(() => ({}))) as { pin?: string };
   const pin = String(body.pin ?? "").trim();
-  const expected = await resolveDashboardPin(c.env);
 
-  if (!pin || pin !== expected) {
-    return c.json({ ok: false, error: "الرقم السري غير صحيح" }, 401);
+  if (!(await isValidDashboardPin(c.env, pin))) {
+    const hint =
+      getEnvDashboardPin(c.env) === "1111"
+        ? "الرقم غير صحيح — جرّب 1111 أو الرقم الذي ضبطته في الإعدادات"
+        : "الرقم غير صحيح — راجع DASHBOARD_PIN في Cloudflare أو الإعدادات";
+    return c.json({ ok: false, error: hint }, 401);
   }
 
   const token = await issueSessionToken(c.env);
   setSessionCookie(c, token);
   return c.json({ ok: true, data: { authenticated: true } });
+});
+
+/** Public hint for login troubleshooting (does not reveal the PIN) */
+auth.get("/hint", async (c) => {
+  const envPin = getEnvDashboardPin(c.env);
+  let pinSource: "supabase" | "env" = "env";
+  let supabaseReachable = false;
+  try {
+    const db = new SupabaseService(c.env);
+    const stored = await db.getSetting("dashboard_pin");
+    supabaseReachable = true;
+    if (stored?.trim()) pinSource = "supabase";
+  } catch {
+    supabaseReachable = false;
+  }
+
+  return c.json({
+    ok: true,
+    data: {
+      pinSource,
+      supabaseReachable,
+      envPinIsDefault: envPin === "1111",
+      multiSession: true,
+      hint:
+        pinSource === "supabase"
+          ? "الرقم في Supabase — جرّب 1111 أيضًا إن لم تغيّره، أو الرقم من الإعدادات"
+          : envPin === "1111"
+            ? "الافتراضي: 1111"
+            : "الرقم من متغير DASHBOARD_PIN في Cloudflare",
+    },
+  });
 });
 
 auth.post("/logout", async (c) => {
