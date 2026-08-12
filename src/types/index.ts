@@ -151,6 +151,15 @@ export interface AliExpressListing {
   shippingCostCurrency?: string;
   isLocalWarehouse?: boolean;
   storeLaunchDate?: string;
+  /** Trust / discovery signals computed locally after search */
+  trustScore?: number;
+  uniquenessScore?: number;
+  discoveryScore?: number;
+  suspiciousMetrics?: boolean;
+  launchYear?: number;
+  isCurrentYear?: boolean;
+  genericTitle?: boolean;
+  problemSolvingTitle?: boolean;
   /** Original English title when auto-translated to Arabic */
   titleEn?: string;
   /** Saudi marketing hook from AI analysis */

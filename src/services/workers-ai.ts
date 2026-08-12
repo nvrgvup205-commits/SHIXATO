@@ -3,6 +3,10 @@ import {
   buildArabicDescriptionHtml,
   normalizeHookAr,
 } from "../utils/arabic-product";
+import {
+  computeDiscoveryScore,
+  isSuspiciousMetrics,
+} from "../utils/listing-discovery";
 
 export interface ProductAiAnalysis extends AiFilterResult {
   suggestedSellingPrice?: number;
@@ -51,27 +55,35 @@ export class WorkersAiService {
     const suggestedSellingPrice =
       cost > 0 ? Math.ceil((cost / (1 - margin / 100)) * 100) / 100 : undefined;
 
-    let score = 50;
+    const discovery = computeDiscoveryScore(listing);
+    let score = discovery.discoveryScore;
     const pros: string[] = [];
     const cons: string[] = [];
 
-    if ((listing.soldCount ?? 0) >= 500) {
-      score += 15;
-      pros.push("مبيعات قوية");
-    } else if ((listing.soldCount ?? 0) >= 100) {
+    if (discovery.problemSolvingTitle) {
+      pros.push("يحل مشكلة واضحة");
       score += 6;
-      pros.push("مبيعات معقولة");
     } else {
-      cons.push("مبيعات محدودة");
+      cons.push("العنوان يبدو عامًا");
+      score -= 8;
+    }
+
+    if (discovery.isCurrentYear) pros.push("منتج جديد " + new Date().getUTCFullYear());
+    else cons.push("قد يكون قديم أو تاريخه غير واضح");
+
+    if (discovery.suspiciousMetrics || isSuspiciousMetrics(listing)) {
+      cons.push("أرقام مبيعات/تقييمات غير منطقية");
+      score = Math.min(score, 35);
+    } else if ((listing.reviewCount ?? 0) >= 20) {
+      pros.push("أرقام تقييم معقولة");
+      score += 5;
     }
 
     if ((listing.rating ?? 0) >= 4.5) {
-      score += 12;
       pros.push("تقييم ممتاز");
-    } else if ((listing.rating ?? 0) >= 4.0) {
-      score += 4;
-    } else {
+    } else if ((listing.rating ?? 0) < 4.0) {
       cons.push("تقييم منخفض");
+      score -= 8;
     }
 
     if (listing.isFreeShipping) pros.push("شحن مجاني");
@@ -82,8 +94,13 @@ export class WorkersAiService {
       cons.push("السعر غير واضح");
     }
 
-    score = Math.max(0, Math.min(100, score));
-    const approved = score >= 55;
+    if (discovery.genericTitle && !discovery.problemSolvingTitle) {
+      cons.push("منتج مكرر/عام (ملصقات، عشوائي…)");
+      score -= 12;
+    }
+
+    score = Math.max(0, Math.min(100, Math.round(score)));
+    const approved = score >= 58 && !discovery.suspiciousMetrics;
     const shortName = listing.title.split(/[,\-–|]/)[0]?.trim() || listing.title;
     const hookAr = normalizeHookAr("تعبت من الفوضى؟ هالقطعة تحلها لك بثواني");
     const adCopyAr = `تخيل ترتّب يومك بدون تعب 😍 ${shortName} — جرّبها الحين ولا تندم.`;
@@ -119,35 +136,57 @@ export class WorkersAiService {
     const shipTo = context?.shipToCountry ?? "SA";
     const margin = context?.targetMarginPercent ?? 40;
 
-    const prompt = `أنت كاتب إعلانات سعودي حقيقي (TikTok/Snap) للسوق السعودي (${shipTo}).
+    const suspicious = isSuspiciousMetrics(listing);
+    const sold = listing.soldCount ?? 0;
+    const reviews = listing.reviewCount ?? 0;
+    const ratio =
+      sold > 0 && reviews > 0 ? (sold / reviews).toFixed(1) : "غير معروف";
+    const discovery = computeDiscoveryScore(listing);
+
+    const prompt = `أنت خبير دروب شيبنج سعودي (TikTok/Snap) ومهمتك اختيار منتجات «رهيبة» — تحل مشكلة حقيقية، ترندية، مو مكررة، وهوكها قوي.
 حلّل منتج AliExpress وأرجع JSON فقط:
 {"approved":boolean,"score":number,"reason":string,"suggestedTitle":string,"hookAr":string,"suggestedSellingPrice":number,"adCopyAr":string,"descriptionAr":string,"pros":string[],"cons":string[],"tags":string[]}
 
-قواعد الهوك hookAr (الأهم):
-- جملة واحدة قصيرة جدًا (6–12 كلمة) بلهجة سعودية بشرية 100%
-- تبدأ بمشكلة يومية يعاني منها العميل ثم تلمّح للحل (مثل: تعبك من …؟ / ليش تتعذب مع …؟ / ترا فيه حل بسيط لـ …)
-- كأنك تكلم صديق — مو إعلان رسمي ولا فصحى ثقيلة
-- ممنوع: جمل طويلة، مبالغة مزيفة، كلمات تسويقية فاضية
+معايير score (مهم جدًا — لا تعطي 90+ لأي منتج عادي):
+- 85-100: يحل مشكلة يومية واضحة + مميز + ترندي + هوك قوي + أرقام معقولة
+- 65-84: جيد لكن أقل تميزًا أو أقل ترند
+- 45-64: عادي / مكرر / صعب تسويقه
+- أقل من 45: مرفوض — generic، ملصقات، wholesale، أرقام مشبوهة
+
+خصم شديد إذا:
+- العنوان generic (stickers, random style, coloring book, wholesale…)
+- مبيعات عالية جدًا مقابل تقييمات قليلة (نسبة مشبوهة)
+- المنتج ما يحل مشكلة محددة
+
+قواعد الهوك hookAr:
+- جملة واحدة قصيرة (6–12 كلمة) بلهجة سعودية بشرية
+- تبدأ بمشكلة يومية ثم تلمّح للحل
+- ممنوع مبالغة مزيفة
 
 قواعد باقي النصوص:
-- suggestedTitle: عنوان متجر عربي سعودي واضح (بدون إيموجي كثير)
-- adCopyAr: جملتين كحد أقصى بلهجة سعودية طبيعية
-- descriptionAr: وصف منتج كامل للمتجر بالعربي (فقرتين + 3-5 نقاط مميزات) بصيغة HTML بسيطة فقط: <p> و <ul><li>
-- استخدم: "الحين"، "مرة"، "تعبك"، "حلها"، "بسيط" — احتفظ بالماركات بالإنجليزي (USB, iPhone…)
-
-قواعد التحليل:
-- approved=true إذا المنتج قابل للبيع (ليس مقلد/سلاح/بالغ)
-- score من 0 إلى 100
+- suggestedTitle: عنوان متجر عربي سعودي واضح
+- adCopyAr: جملتين كحد أقصى
+- descriptionAr: وصف HTML بسيط (<p>, <ul><li>) يبرز المشكلة والحل
 - suggestedSellingPrice بالدولار مع هامش ~${margin}%
+- approved=true فقط إذا score >= 58 وليس مقلد/سلاح/بالغ وليست الأرقام مشبوهة
+
+إشارات النظام:
+- discoveryScore: ${discovery.discoveryScore}/100
+- أرقام مشبوهة: ${suspicious ? "نعم — خفّض السكور" : "لا"}
+- نسبة مبيعات/تقييمات: ${ratio}
+- سنة الإدراج: ${listing.launchYear ?? discovery.launchYear ?? "غير معروف"}
+- يحل مشكلة (تحليل عنوان): ${discovery.problemSolvingTitle ? "نعم" : "ضعيف"}
+- عنوان generic: ${discovery.genericTitle ? "نعم — خصم" : "لا"}
 
 المنتج:
 العنوان الأصلي: ${listing.title}
 السعر: ${listing.originalPrice} ${listing.currency}
-المبيعات: ${listing.soldCount ?? "غير معروف"}
+المبيعات: ${sold || "غير معروف"}
 التقييم: ${listing.rating ?? "غير معروف"}
-عدد التقييمات: ${listing.reviewCount ?? "غير معروف"}
+عدد التقييمات: ${reviews || "غير معروف"}
 شحن مجاني: ${listing.isFreeShipping ? "نعم" : "لا"}
-Choice: ${listing.isChoice ? "نعم" : "لا"}`;
+Choice: ${listing.isChoice ? "نعم" : "لا"}
+تاريخ الإدراج: ${listing.storeLaunchDate ?? "غير معروف"}`;
 
     const result = await this.env.AI!.run(MODEL, {
       messages: [

@@ -34,12 +34,14 @@ describe("AliExpressService soft scoring", () => {
     const html = `
       <html><script>
       {"itemList":{"content":[
-        {"productId":"1005001111111111","title":{"displayTitle":"حامل جوال للسيارة"},
+        {"productId":"1005001111111111","lunchTime":"2026-03-01 00:00:00",
+         "title":{"displayTitle":"Smart Car Phone Holder Organizer Mount"},
          "prices":{"salePrice":{"currencyCode":"USD","minPrice":8.5}},
-         "trade":{"realTradeCount":120},"evaluation":{"starRating":4.2}},
-        {"productId":"1005002222222222","title":{"displayTitle":"كابل شحن سريع"},
+         "trade":{"realTradeCount":1200},"evaluation":{"starRating":4.6,"localeEvalCnt":180}},
+        {"productId":"1005002222222222","lunchTime":"2026-02-15 00:00:00",
+         "title":{"displayTitle":"Portable Multi-Function Storage Organizer"},
          "prices":{"salePrice":{"currencyCode":"USD","minPrice":3.2}},
-         "trade":{"realTradeCount":800},"evaluation":{"starRating":4.7}}
+         "trade":{"realTradeCount":800},"evaluation":{"starRating":4.7,"localeEvalCnt":95}}
       ]}}
       </script></html>
     `;

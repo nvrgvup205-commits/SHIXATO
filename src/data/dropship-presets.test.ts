@@ -18,7 +18,7 @@ describe("dropship-presets", () => {
     expect(filters.locale).toBe("ar");
     expect(filters.query).toBe("phone accessories");
     expect(filters.category).toBe("phones");
-    expect(filters.minSold).toBe(300);
+    expect(filters.minSold).toBe(200);
     expect(filters.presetGrade).toBe("balanced");
   });
 

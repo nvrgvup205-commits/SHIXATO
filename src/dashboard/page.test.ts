@@ -19,4 +19,10 @@ describe("renderDashboardPage", () => {
     expect(html).toContain('id="postSort"');
     expect(html).toContain('id="postShipping"');
   });
+
+  it("includes login button handler", () => {
+    const html = renderDashboardPage("test.myshopify.com");
+    expect(html).toContain('id="loginBtn"');
+    expect(html).toContain('("loginBtn").onclick = login');
+  });
 });

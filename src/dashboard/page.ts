@@ -335,7 +335,7 @@ export function renderDashboardPage(storeDomain: string): string {
           <button class="btn btn-accent" id="searchBtn" type="button">بحث</button>
         </div>
         <div id="presetTip" class="hidden"></div>
-        <p class="hint" id="aiStatusHint">١) اختر <strong>الفئة</strong>  ٢) اضغط 🥉 مبتدئ / 🥈 متوسط / 🥇 محترف — أو ابحث يدويًا</p>
+        <p class="hint" id="aiStatusHint">بحث ذكي يفضّل منتجات صادقة + تميّز + سنة 2026 — 🤖 يقيّم حل المشكلة والهوك</p>
 
         <details class="more" id="advancedFilters">
           <summary>فلاتر متقدمة</summary>
@@ -449,6 +449,7 @@ export function renderDashboardPage(storeDomain: string): string {
           <div class="post-filters-row">
             <label>ترتيب
               <select id="postSort">
+                <option value="discovery_desc" selected>الأقوى اكتشافًا 🔥</option>
                 <option value="default">كما ظهرت</option>
                 <option value="price_asc">السعر ↑ (أرخص أولًا)</option>
                 <option value="price_desc">السعر ↓ (أغلى أولًا)</option>
@@ -466,6 +467,8 @@ export function renderDashboardPage(storeDomain: string): string {
             </label>
             <label class="check"><input id="postChoiceOnly" type="checkbox" /> Choice فقط</label>
             <label class="check"><input id="postHighRated" type="checkbox" /> تقييم 4.5+</label>
+            <label class="check"><input id="postHideSuspicious" type="checkbox" checked /> إخفاء أرقام مشبوهة</label>
+            <label class="check"><input id="postCurrentYear" type="checkbox" /> سنة 2026 فقط</label>
             <button class="btn btn-ghost" id="postFilterReset" type="button">إعادة ضبط</button>
           </div>
           <div id="postFilterStatus" class="hint" style="margin:.35rem 0 0"></div>
@@ -746,6 +749,8 @@ export function renderDashboardPage(storeDomain: string): string {
         locale: $("locale").value || "ar",
         applyUrlFilters: strict,
         filterMode: strict ? "strict" : "soft",
+        discoveryMode: !strict,
+        minLaunchYear: strict ? undefined : new Date().getUTCFullYear(),
         fetchPages: strict ? 1 : 2,
       };
     }
@@ -1038,27 +1043,56 @@ export function renderDashboardPage(storeDomain: string): string {
         Boolean(item.isFreeShipping);
     }
 
+    function itemIsSuspicious(item) {
+      if (item.suspiciousMetrics != null) return Boolean(item.suspiciousMetrics);
+      const sold = item.soldCount ?? 0;
+      const reviews = item.reviewCount ?? 0;
+      if (sold < 150) return false;
+      if (reviews < 3) return sold >= 800;
+      return (sold / reviews) > 45;
+    }
+
+    function itemDiscoveryScore(item) {
+      return Number(item.discoveryScore) || 0;
+    }
+
+    function itemLaunchYear(item) {
+      if (item.launchYear) return Number(item.launchYear);
+      const d = item.storeLaunchDate || "";
+      const m = String(d).match(/\\b(20\\d{2})\\b/);
+      return m ? Number(m[1]) : 0;
+    }
+
     function readPostFilterOptions() {
       return {
         sort: $("postSort").value,
         shipping: $("postShipping").value,
         choiceOnly: $("postChoiceOnly").checked,
         highRated: $("postHighRated").checked,
+        hideSuspicious: $("postHideSuspicious").checked,
+        currentYearOnly: $("postCurrentYear").checked,
       };
     }
 
     function applyPostFilters() {
       const base = state.resultItems || [];
       const opts = readPostFilterOptions();
+      const currentYear = new Date().getUTCFullYear();
       let items = base.slice();
 
+      if (opts.hideSuspicious) items = items.filter((i) => !itemIsSuspicious(i));
+      if (opts.currentYearOnly) {
+        items = items.filter((i) => itemLaunchYear(i) === currentYear || i.isCurrentYear);
+      }
       if (opts.shipping === "free") items = items.filter(itemIsFreeShipping);
       else if (opts.shipping === "paid") items = items.filter((i) => !itemIsFreeShipping(i));
 
       if (opts.choiceOnly) items = items.filter((i) => i.isChoice);
       if (opts.highRated) items = items.filter((i) => (Number(i.rating) || 0) >= 4.5);
 
-      if (opts.sort === "price_asc") items.sort((a, b) => itemPrice(a) - itemPrice(b));
+      if (opts.sort === "discovery_desc") {
+        items.sort((a, b) => itemDiscoveryScore(b) - itemDiscoveryScore(a));
+      } else if (opts.sort === "price_asc") items.sort((a, b) => itemPrice(a) - itemPrice(b));
       else if (opts.sort === "price_desc") items.sort((a, b) => itemPrice(b) - itemPrice(a));
       else if (opts.sort === "sold_desc") items.sort((a, b) => itemSold(b) - itemSold(a));
       else if (opts.sort === "sold_asc") items.sort((a, b) => itemSold(a) - itemSold(b));
@@ -1066,14 +1100,16 @@ export function renderDashboardPage(storeDomain: string): string {
 
       renderResults(items);
       $("postFilterStatus").textContent =
-        "عرض " + items.length + " من " + base.length + " نتيجة (فلترة محلية بدون بحث جديد)";
+        "عرض " + items.length + " من " + base.length + " نتيجة (فلترة محلية — صادقة + تميّز)";
     }
 
     function resetPostFilters() {
-      $("postSort").value = "default";
+      $("postSort").value = "discovery_desc";
       $("postShipping").value = "all";
       $("postChoiceOnly").checked = false;
       $("postHighRated").checked = false;
+      $("postHideSuspicious").checked = true;
+      $("postCurrentYear").checked = false;
       applyPostFilters();
     }
 
@@ -1101,6 +1137,19 @@ export function renderDashboardPage(storeDomain: string): string {
           '<span class="badge">' + escapeHtml(b) + "</span>"
         ).join("");
         const detailLines = buildProductDetailLines(item);
+        const flags = [];
+        if (item.discoveryScore != null) {
+          flags.push('<span class="badge" style="background:#e8ff57;color:#10231f">🔥 ' + escapeHtml(String(item.discoveryScore)) + "</span>");
+        }
+        if (itemIsSuspicious(item)) {
+          flags.push('<span class="badge" style="background:#fee4e2;color:#b42318">⚠️ أرقام مشبوهة</span>');
+        }
+        if (item.isCurrentYear || itemLaunchYear(item) === new Date().getUTCFullYear()) {
+          flags.push('<span class="badge">🆕 ' + new Date().getUTCFullYear() + "</span>");
+        }
+        if (item.problemSolvingTitle) {
+          flags.push('<span class="badge">💡 يحل مشكلة</span>');
+        }
         const detailsHtml = detailLines.map((line) => {
           if (typeof line === "string") {
             return "<span>" + escapeHtml(line) + "</span>";
@@ -1121,7 +1170,7 @@ export function renderDashboardPage(storeDomain: string): string {
             (item.images && item.images.length > 1 ? (" · " + item.images.length + " صور") : "") +
           "</div>" +
           (detailsHtml ? ('<div class="product-details">' + detailsHtml + "</div>") : "") +
-          '<div class="badges">' + badgeHtml + "</div>" +
+          '<div class="badges">' + flags.join("") + badgeHtml + "</div>" +
           "</div>";
         el.onclick = () => openDrawer(item);
         root.appendChild(el);
@@ -1197,7 +1246,7 @@ export function renderDashboardPage(storeDomain: string): string {
         if ((state.resultItems || []).length) applyPostFilters();
       });
     });
-    ["postChoiceOnly", "postHighRated"].forEach((id) => {
+    ["postChoiceOnly", "postHighRated", "postHideSuspicious", "postCurrentYear"].forEach((id) => {
       $(id).addEventListener("change", () => {
         if ((state.resultItems || []).length) applyPostFilters();
       });

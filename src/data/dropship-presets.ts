@@ -3,6 +3,11 @@ import type { ProductSearchFilters } from "../types";
 
 export type DropshipGrade = "starter" | "balanced" | "pro";
 
+const CURRENT_YEAR = new Date().getUTCFullYear();
+
+const DISCOVERY_EXCLUDES =
+  "replica,fake,counterfeit,sticker,stickers,coloring book,random style,assorted,wholesale,bulk lot,mixed styles,generic";
+
 export interface DropshipPreset {
   id: DropshipGrade;
   labelAr: string;
@@ -14,77 +19,83 @@ export interface DropshipPreset {
 }
 
 /**
- * Grade presets tune filters/scoring only.
- * Search scope comes from the dashboard category picker (required for smart search).
+ * Grade presets tune discovery/trust filters.
+ * Search scope comes from the dashboard category picker.
  */
 export const DROPSHIP_PRESETS: DropshipPreset[] = [
   {
     id: "starter",
     emoji: "🥉",
     labelAr: "مبتدئ",
-    descAr: "اكتشاف واسع داخل الفئة — أكبر عدد نتائج",
-    tipAr: "اختر الفئة أولًا. للتجربة: اختر 3 منتجات واختبر إعلانًا بسيطًا.",
+    descAr: "اكتشاف داخل الفئة — يفضّل منتجات صادقة وحلّ مشاكل",
+    tipAr: "اختر الفئة أولًا. نتائج أقل لكن أصدق من البحث العشوائي.",
     filters: {
-      sort: "orders",
+      sort: "newest",
       locale: "ar",
       filterMode: "soft",
+      discoveryMode: true,
+      minLaunchYear: CURRENT_YEAR,
       applyUrlFilters: false,
       fetchPages: 2,
       currency: "USD",
       shipToCountry: "SA",
-      minSold: 100,
-      minRating: 4.0,
-      minReviews: 10,
-      maxNegativeRate: 30,
-      excludeKeywords: "replica,fake,counterfeit",
+      minSold: 80,
+      minRating: 4.2,
+      minReviews: 15,
+      maxNegativeRate: 28,
+      excludeKeywords: DISCOVERY_EXCLUDES,
     },
   },
   {
     id: "balanced",
     emoji: "🥈",
     labelAr: "متوسط",
-    descAr: "توازن مبيعات + تقييم داخل الفئة — الأنسب يوميًا",
-    tipAr: "اختر الفئة ثم 🥈. ركّز على منتج بسيط وهامش 35%+.",
+    descAr: "توازن — منتجات تميّز + مصداقية + سنة حالية",
+    tipAr: "الأفضل يوميًا: فئة واضحة + 🥈. ركّز على حل مشكلة حقيقية.",
     filters: {
-      sort: "orders",
+      sort: "newest",
       locale: "ar",
       filterMode: "soft",
+      discoveryMode: true,
+      minLaunchYear: CURRENT_YEAR,
       applyUrlFilters: false,
       fetchPages: 2,
       currency: "USD",
       shipToCountry: "SA",
-      minSold: 300,
-      minRating: 4.3,
-      minReviews: 30,
+      minSold: 200,
+      minRating: 4.4,
+      minReviews: 25,
       maxNegativeRate: 22,
-      minDiscountPercent: 10,
+      minDiscountPercent: 8,
       targetSellingPrice: 79,
       minMarginPercent: 30,
-      excludeKeywords: "replica,fake,counterfeit,used",
+      excludeKeywords: DISCOVERY_EXCLUDES + ",used,broken",
     },
   },
   {
     id: "pro",
     emoji: "🥇",
     labelAr: "محترف",
-    descAr: "أعلى جودة داخل الفئة — مبيعات وتقييم قوي",
-    tipAr: "اختر الفئة ثم 🥇. نتائج أقل لكن أدق قبل ميزانية الإعلانات.",
+    descAr: "أقوى فلتر — تميّز عالي + أرقام منطقية + 2026",
+    tipAr: "نتائج أقل لكن «رهيبة». مثالي قبل إنفاق ميزانية إعلانات.",
     filters: {
-      sort: "orders",
+      sort: "newest",
       locale: "ar",
       filterMode: "soft",
+      discoveryMode: true,
+      minLaunchYear: CURRENT_YEAR,
       applyUrlFilters: false,
       fetchPages: 3,
       currency: "USD",
       shipToCountry: "SA",
-      minSold: 500,
+      minSold: 300,
       minRating: 4.5,
-      minReviews: 50,
+      minReviews: 40,
       maxNegativeRate: 18,
-      minDiscountPercent: 15,
+      minDiscountPercent: 12,
       targetSellingPrice: 99,
       minMarginPercent: 35,
-      excludeKeywords: "replica,fake,counterfeit,used,broken",
+      excludeKeywords: DISCOVERY_EXCLUDES + ",used,broken,random",
     },
   },
 ];
@@ -118,12 +129,14 @@ export function buildPresetSearch(
     page: 1,
     presetGrade: grade,
     filterMode: "soft",
+    discoveryMode: true,
+    minLaunchYear: CURRENT_YEAR,
     applyUrlFilters: false,
   };
 }
 
 export function presetMinScore(grade: DropshipGrade): number {
-  if (grade === "pro") return 58;
-  if (grade === "balanced") return 48;
-  return 38;
+  if (grade === "pro") return 62;
+  if (grade === "balanced") return 52;
+  return 42;
 }
