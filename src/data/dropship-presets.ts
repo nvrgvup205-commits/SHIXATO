@@ -1,3 +1,4 @@
+import { resolveSearchQuery } from "./categories";
 import type { ProductSearchFilters } from "../types";
 
 export type DropshipGrade = "starter" | "balanced" | "pro";
@@ -8,34 +9,21 @@ export interface DropshipPreset {
   emoji: string;
   descAr: string;
   tipAr: string;
-  queries: string[];
   /** Scoring hints — applied in soft mode, not as hard URL filters */
   filters: Omit<ProductSearchFilters, "query" | "category" | "page">;
 }
 
 /**
- * Presets use soft scoring + minimal AE URLs (no strict URL filters)
- * so results are not wiped by local filters or AE anti-bot.
+ * Grade presets tune filters/scoring only.
+ * Search scope comes from the dashboard category picker (required for smart search).
  */
 export const DROPSHIP_PRESETS: DropshipPreset[] = [
   {
     id: "starter",
     emoji: "🥉",
     labelAr: "مبتدئ",
-    descAr: "اكتشاف واسع — أكبر عدد نتائج",
-    tipAr: "للتجربة السريعة: اختر 3 منتجات واختبر إعلانًا بسيطًا.",
-    queries: [
-      "kitchen gadgets",
-      "phone accessories",
-      "car organizer",
-      "led lights",
-      "home decor",
-      "smart watch",
-      "storage box",
-      "pet supplies",
-      "travel bag",
-      "beauty tools",
-    ],
+    descAr: "اكتشاف واسع داخل الفئة — أكبر عدد نتائج",
+    tipAr: "اختر الفئة أولًا. للتجربة: اختر 3 منتجات واختبر إعلانًا بسيطًا.",
     filters: {
       sort: "orders",
       locale: "ar",
@@ -55,20 +43,8 @@ export const DROPSHIP_PRESETS: DropshipPreset[] = [
     id: "balanced",
     emoji: "🥈",
     labelAr: "متوسط",
-    descAr: "توازن مبيعات + تقييم — الأنسب يوميًا",
-    tipAr: "الأكثر استخدامًا. ركّز على منتج بسيط وهامش 35%+.",
-    queries: [
-      "wireless earbuds",
-      "phone holder",
-      "power bank",
-      "massage gun",
-      "portable blender",
-      "hijab pin",
-      "cleaning tools",
-      "gaming accessories",
-      "smart home",
-      "car accessories",
-    ],
+    descAr: "توازن مبيعات + تقييم داخل الفئة — الأنسب يوميًا",
+    tipAr: "اختر الفئة ثم 🥈. ركّز على منتج بسيط وهامش 35%+.",
     filters: {
       sort: "orders",
       locale: "ar",
@@ -91,20 +67,8 @@ export const DROPSHIP_PRESETS: DropshipPreset[] = [
     id: "pro",
     emoji: "🥇",
     labelAr: "محترف",
-    descAr: "أعلى جودة — مبيعات وتقييم قوي",
-    tipAr: "نتائج أقل لكن أدق. مثالي قبل إنفاق ميزانية إعلانات.",
-    queries: [
-      "trending gadgets",
-      "car vacuum",
-      "mini projector",
-      "portable fan",
-      "water bottle",
-      "security camera",
-      "outdoor camping",
-      "tablet accessories",
-      "kitchen organizer",
-      "fitness equipment",
-    ],
+    descAr: "أعلى جودة داخل الفئة — مبيعات وتقييم قوي",
+    tipAr: "اختر الفئة ثم 🥇. نتائج أقل لكن أدق قبل ميزانية الإعلانات.",
     filters: {
       sort: "orders",
       locale: "ar",
@@ -125,11 +89,6 @@ export const DROPSHIP_PRESETS: DropshipPreset[] = [
   },
 ];
 
-export function pickPresetQuery(preset: DropshipPreset): string {
-  const idx = Math.floor(Math.random() * preset.queries.length);
-  return preset.queries[idx] ?? preset.queries[0] ?? "gadgets";
-}
-
 export function findPreset(id: string): DropshipPreset | undefined {
   return DROPSHIP_PRESETS.find((p) => p.id === id);
 }
@@ -141,10 +100,21 @@ export function buildPresetSearch(
   const preset = findPreset(grade);
   if (!preset) throw new Error(`Unknown preset: ${grade}`);
 
+  const category = overrides?.category;
+  const resolved = resolveSearchQuery({
+    query: overrides?.query,
+    category,
+  });
+
+  if (!resolved.query || resolved.query.length < 2) {
+    throw new Error("CATEGORY_REQUIRED");
+  }
+
   return {
     ...preset.filters,
     ...overrides,
-    query: overrides?.query ?? pickPresetQuery(preset),
+    query: resolved.query,
+    category: resolved.categoryId ?? category,
     page: 1,
     presetGrade: grade,
     filterMode: "soft",

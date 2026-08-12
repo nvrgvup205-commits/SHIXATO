@@ -212,7 +212,8 @@ export function renderDashboardPage(storeDomain: string): string {
       background: rgba(255,255,255,.92); border: 1px solid var(--line);
       backdrop-filter: blur(12px); box-shadow: 0 8px 24px rgba(16,35,31,.06);
     }
-  .search-topbar #query { flex: 1 1 220px; min-width: 160px; margin: 0; }
+  .search-topbar #query { flex: 1 1 180px; min-width: 140px; margin: 0; }
+  .search-topbar #category { flex: 1 1 200px; min-width: 170px; margin: 0; }
   .search-topbar select { width: auto; min-width: 110px; margin: 0; padding: .65rem .7rem; }
   .search-topbar .btn { white-space: nowrap; padding: .65rem .9rem; }
   .preset-chips { display: flex; gap: .35rem; flex-wrap: wrap; }
@@ -300,7 +301,8 @@ export function renderDashboardPage(storeDomain: string): string {
 
       <section id="tab-search" class="panel">
         <div class="search-topbar">
-          <input id="query" type="search" placeholder="ابحث… أو اضغط 🥈 للبحث الذكي" />
+          <select id="category" title="الفئة — مطلوب للبحث الذكي">${categoryOptions}</select>
+          <input id="query" type="search" placeholder="كلمات إضافية داخل الفئة (اختياري)…" />
           <select id="shipToCountry" title="الشحن إلى">
             <option value="SA" selected>🇸🇦 SA</option>
             <option value="AE">🇦🇪 AE</option>
@@ -315,15 +317,11 @@ export function renderDashboardPage(storeDomain: string): string {
           <button class="btn btn-accent" id="searchBtn" type="button">بحث</button>
         </div>
         <div id="presetTip" class="hidden"></div>
-        <p class="hint" id="aiStatusHint">البحث بالإنجليزي (مجاني) — الترجمة السعودية + الهوك عند 🤖 ثم حفظ المفضلة</p>
+        <p class="hint" id="aiStatusHint">١) اختر <strong>الفئة</strong>  ٢) اضغط 🥉 مبتدئ / 🥈 متوسط / 🥇 محترف — أو ابحث يدويًا</p>
 
         <details class="more" id="advancedFilters">
-          <summary>فلاتر متقدمة + فئة (اختياري)</summary>
+          <summary>فلاتر متقدمة</summary>
           <div class="filters" style="margin-top:.75rem;margin-bottom:.5rem">
-            <div class="wide">
-              <label for="category">الفئة</label>
-              <select id="category">${categoryOptions}</select>
-            </div>
             <label class="check wide"><input id="strictFilters" type="checkbox" /> فلتر صارم (قد يقلّل النتائج)</label>
           </div>
 
@@ -418,7 +416,7 @@ export function renderDashboardPage(storeDomain: string): string {
         </div>
         </details>
 
-        <p class="hint">نصيحة: اترك «فلتر صارم» غير مفعّل لنتائج أكثر — البحث الذكي 🥈 هو الأسرع.</p>
+        <p class="hint">نصيحة: اختر الفئة ثم 🥈 متوسط — أو اترك «فلتر صارم» غير مفعّل لنتائج أكثر.</p>
         <div id="searchStatus" class="hint"></div>
         <div id="searchUrlRow" class="hidden" style="margin:.35rem 0">
           <a class="btn btn-ghost" id="openSearchAe" href="#" target="_blank" rel="noopener" style="text-decoration:none;font-size:.85rem">
@@ -823,16 +821,28 @@ export function renderDashboardPage(storeDomain: string): string {
     }
 
     async function runSmartSearch(grade) {
+      const category = $("category").value;
+      const extraQuery = $("query").value.trim();
+      if (!category && extraQuery.length < 2) {
+        toast("اختر الفئة أولًا من القائمة 👆", true);
+        $("category").focus();
+        return;
+      }
+
       document.querySelectorAll(".preset-chip").forEach((b) => { b.disabled = true; });
       const preset = PRESETS.find((p) => p.id === grade);
+      const catLabel = $("category").selectedOptions[0]?.textContent || "";
       showPresetTip(preset ? ("💡 " + preset.tipAr) : "");
-      $("searchStatus").textContent = "جاري البحث الذكي (" + (preset?.labelAr || grade) + ")…";
+      $("searchStatus").textContent =
+        "جاري البحث الذكي في «" + (catLabel || extraQuery) + "» (" + (preset?.labelAr || grade) + ")…";
       $("filterActions").classList.add("hidden");
       try {
         const res = await api("/api/favorites/smart-search", {
           method: "POST",
           body: JSON.stringify({
             grade,
+            category: category || undefined,
+            query: extraQuery || undefined,
             shipToCountry: $("shipToCountry").value,
             currency: $("currency").value,
           }),
@@ -846,11 +856,14 @@ export function renderDashboardPage(storeDomain: string): string {
           query: data.query,
           locale: "ar",
         });
-        const via = data.presetLabelAr ? (" · " + data.presetLabelAr) : "";
+        const via = (data.filtersApplied && data.filtersApplied.categoryLabelAr)
+          ? (" · فئة: " + data.filtersApplied.categoryLabelAr)
+          : (data.presetLabelAr ? (" · " + data.presetLabelAr) : "");
         $("searchStatus").textContent =
           "نتائج ذكية: " + (data.totalAfterFilter ?? items.length) +
           " بعد الفلتر / " + (data.totalParsed ?? items.length) + " قبل الفلتر" +
-          " · بحث: " + (data.query || "") + via +
+          via +
+          (data.query ? (" · " + data.query) : "") +
           (data.warning ? (" — " + data.warning) : "");
 
         if (data.searchUrl) {

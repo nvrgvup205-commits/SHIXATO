@@ -62,6 +62,8 @@ favorites.get("/presets", requireAuth, (c) => {
 favorites.post("/smart-search", requireAuth, async (c) => {
   const body = (await c.req.json().catch(() => ({}))) as {
     grade?: DropshipGrade;
+    category?: string;
+    query?: string;
     shipToCountry?: string;
     currency?: string;
   };
@@ -71,8 +73,22 @@ favorites.post("/smart-search", requireAuth, async (c) => {
     return c.json({ ok: false, error: "grade مطلوب: starter | balanced | pro" }, 400);
   }
 
+  const hasCategory = Boolean(body.category?.trim());
+  const hasQuery = Boolean(body.query?.trim() && body.query.trim().length >= 2);
+  if (!hasCategory && !hasQuery) {
+    return c.json(
+      {
+        ok: false,
+        error: "اختر الفئة أولًا ثم اضغط مبتدئ / متوسط / محترف",
+      },
+      400,
+    );
+  }
+
   try {
     const filters = buildPresetSearch(grade, {
+      category: body.category,
+      query: body.query,
       shipToCountry: body.shipToCountry,
       currency: body.currency,
     });
@@ -87,6 +103,12 @@ favorites.post("/smart-search", requireAuth, async (c) => {
       },
     });
   } catch (err) {
+    if (err instanceof Error && err.message === "CATEGORY_REQUIRED") {
+      return c.json(
+        { ok: false, error: "اختر الفئة أولًا ثم اضغط مبتدئ / متوسط / محترف" },
+        400,
+      );
+    }
     if (err instanceof HttpError) {
       return c.json(
         { ok: false, error: err.message, details: err.details ?? null },
