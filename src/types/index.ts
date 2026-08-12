@@ -156,7 +156,12 @@ export interface AliExpressListing {
   /** Saudi marketing hook from AI analysis */
   hookAr?: string;
   adCopyAr?: string;
+  /** Full Arabic product description (plain or simple HTML) for Shopify */
+  descriptionAr?: string;
+  pros?: string[];
   aiScore?: number;
+  /** Override selling price saved while editing favorites */
+  sellingPrice?: number;
 }
 
 export interface AliExpressSearchResult {

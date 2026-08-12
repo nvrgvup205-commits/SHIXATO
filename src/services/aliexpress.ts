@@ -15,6 +15,7 @@ import {
   HttpError,
   resolveAliExpressProductUrl,
 } from "../utils/http";
+import { resolveArabicDescriptionHtml } from "../utils/arabic-product";
 
 /**
  * AliExpress product extractor + search.
@@ -248,7 +249,7 @@ export class AliExpressService {
       aliexpressId: id,
       url: listing.url || this.buildProductUrl(id),
       title: listing.title?.trim() || `AliExpress Product ${id}`,
-      descriptionHtml: `<p>${this.escapeHtml(listing.title || id)}</p>`,
+      descriptionHtml: resolveArabicDescriptionHtml(listing),
       currency: listing.currency || "USD",
       originalPrice: price,
       minPrice: price,

@@ -253,6 +253,18 @@ export function renderDashboardPage(storeDomain: string): string {
     .fav-card img { width: 72px; height: 72px; object-fit: cover; border-radius: 10px; flex-shrink: 0; }
     .fav-actions { display: flex; gap: .4rem; flex-wrap: wrap; margin-top: .45rem; }
     .fav-actions .btn { padding: .45rem .7rem; font-size: .82rem; }
+    .score-badge {
+      display: inline-block; font-size: .72rem; font-weight: 700;
+      padding: .18rem .45rem; border-radius: 999px; margin-inline-end: .35rem;
+      background: rgba(15,138,106,.14); color: var(--accent);
+    }
+    .fav-edit-modal {
+      position: fixed; inset: 0; z-index: 70; background: rgba(16,35,31,.45);
+      display: flex; align-items: center; justify-content: center; padding: 1rem;
+    }
+    .fav-edit-modal.hidden { display: none; }
+    .fav-edit-box { width: min(540px, 100%); max-height: 90vh; overflow: auto; }
+    .fav-edit-box textarea { min-height: 140px; resize: vertical; line-height: 1.5; }
     @keyframes rise { from { opacity: 0; transform: translateY(12px);} to { opacity: 1; transform: none;} }
     @keyframes pop { from { opacity: 0; transform: scale(.97);} to { opacity: 1; transform: none;} }
   </style>
@@ -421,12 +433,31 @@ export function renderDashboardPage(storeDomain: string): string {
       </section>
 
       <section id="tab-favorites" class="panel hidden">
-        <p class="hint">منتجات حفظتها للمراجعة قبل الرفع إلى Shopify. راجعها ثم ارفع أو احذف.</p>
+        <p class="hint">منتجات حفظتها للمراجعة — مرتبة حسب تقييم الذكاء الاصطناعي. عدّل العنوان والوصف قبل الرفع إلى Shopify.</p>
         <div style="display:flex;gap:.55rem;flex-wrap:wrap;margin-bottom:.75rem">
           <button class="btn btn-ghost" id="refreshFavorites" type="button">تحديث المفضلة</button>
         </div>
         <div id="favoritesList"></div>
       </section>
+
+      <div id="favEditModal" class="fav-edit-modal hidden" role="dialog" aria-modal="true">
+        <div class="fav-edit-box panel">
+          <h3 style="margin:0 0 .75rem;font-family:var(--display)">تعديل قبل الرفع</h3>
+          <input id="favEditId" type="hidden" />
+          <label for="favEditTitle">العنوان العربي (Shopify)</label>
+          <input id="favEditTitle" type="text" />
+          <label for="favEditHook" style="margin-top:.65rem">الهوك — مشكلة + حل (مختصر)</label>
+          <input id="favEditHook" type="text" placeholder="مثال: تعبك من الفوضى بالسيارة؟ هالقطعة تحلها لك" />
+          <label for="favEditDesc" style="margin-top:.65rem">وصف المنتج بالعربي (يُرفع كاملًا على Shopify)</label>
+          <textarea id="favEditDesc" placeholder="الوصف الكامل للمنتج…"></textarea>
+          <label for="favEditSell" style="margin-top:.65rem">سعر البيع ($)</label>
+          <input id="favEditSell" type="number" min="0" step="0.01" placeholder="اتركه فارغًا للهامش التلقائي" />
+          <div style="display:flex;gap:.55rem;flex-wrap:wrap;margin-top:.85rem">
+            <button class="btn btn-primary" id="favEditSave" type="button">حفظ التعديلات</button>
+            <button class="btn btn-ghost" id="favEditCancel" type="button">إلغاء</button>
+          </div>
+        </div>
+      </div>
 
       <section id="tab-add" class="panel hidden">
         <p class="hint">ألصق <strong>رابط المنتج</strong> من علي إكسبريس أو <strong>رقم المنتج</strong> فقط — ثم معاينة أو رفع مباشرة إلى Shopify.</p>
@@ -735,7 +766,10 @@ export function renderDashboardPage(storeDomain: string): string {
         title: aiAnalysis.suggestedTitle,
         hookAr: aiAnalysis.hookAr || undefined,
         adCopyAr: aiAnalysis.adCopyAr || undefined,
+        descriptionAr: aiAnalysis.descriptionAr || undefined,
+        pros: aiAnalysis.pros || undefined,
         aiScore: aiAnalysis.score,
+        sellingPrice: aiAnalysis.suggestedSellingPrice || undefined,
       };
       await api("/api/favorites", {
         method: "POST",
@@ -746,7 +780,10 @@ export function renderDashboardPage(storeDomain: string): string {
             suggestedTitle: aiAnalysis.suggestedTitle,
             hookAr: aiAnalysis.hookAr,
             adCopyAr: aiAnalysis.adCopyAr,
+            descriptionAr: aiAnalysis.descriptionAr,
+            pros: aiAnalysis.pros,
             score: aiAnalysis.score,
+            suggestedSellingPrice: aiAnalysis.suggestedSellingPrice,
           },
           notes: aiAnalysis.adCopyAr || aiAnalysis.hookAr || null,
         }),
@@ -1107,6 +1144,7 @@ export function renderDashboardPage(storeDomain: string): string {
           "<div>" + escapeHtml(a.reason || "") + "</div>" +
           (a.hookAr ? ("<div style='margin-top:.5rem'><b>الهوك:</b> " + escapeHtml(a.hookAr) + "</div>") : "") +
           (a.suggestedTitle ? ("<div style='margin-top:.4rem'><b>عنوان سعودي للمتجر:</b> " + escapeHtml(a.suggestedTitle) + "</div>") : "") +
+          (a.descriptionAr ? ("<div style='margin-top:.4rem'><b>وصف Shopify:</b> <div class='sub' style='white-space:pre-wrap;margin-top:.25rem'>" + escapeHtml(a.descriptionAr.replace(/<[^>]+>/g, " ").replace(/\\s+/g, " ").trim()) + "</div></div>") : "") +
           (a.suggestedSellingPrice ? ("<div><b>سعر بيع مقترح:</b> " + money(a.suggestedSellingPrice) + "</div>") : "") +
           (a.adCopyAr ? ("<div style='margin-top:.4rem'><b>نص إعلان:</b> " + escapeHtml(a.adCopyAr) + "</div>") : "") +
           (pros ? ("<ul>" + pros + "</ul>") : "") +
@@ -1193,6 +1231,54 @@ export function renderDashboardPage(storeDomain: string): string {
     }
     $("refreshCatalog").onclick = loadCatalog;
 
+    function stripHtml(s) {
+      return String(s || "").replace(/<[^>]+>/g, " ").replace(/\\s+/g, " ").trim();
+    }
+
+    function openFavoriteEdit(fav) {
+      const listing = fav.listing || {};
+      $("favEditId").value = fav.id;
+      $("favEditTitle").value = fav.title || "";
+      $("favEditHook").value = listing.hookAr || "";
+      $("favEditDesc").value = listing.descriptionAr
+        ? stripHtml(listing.descriptionAr)
+        : [listing.hookAr, listing.adCopyAr].filter(Boolean).join("\\n\\n");
+      $("favEditSell").value = listing.sellingPrice ? String(listing.sellingPrice) : "";
+      $("favEditModal").classList.remove("hidden");
+    }
+
+    function closeFavoriteEdit() {
+      $("favEditModal").classList.add("hidden");
+    }
+
+    $("favEditCancel").onclick = closeFavoriteEdit;
+    $("favEditModal").onclick = (e) => {
+      if (e.target === $("favEditModal")) closeFavoriteEdit();
+    };
+    $("favEditSave").onclick = async () => {
+      const id = $("favEditId").value;
+      if (!id) return;
+      $("favEditSave").disabled = true;
+      try {
+        await api("/api/favorites/" + id, {
+          method: "PATCH",
+          body: JSON.stringify({
+            title: $("favEditTitle").value.trim(),
+            hookAr: $("favEditHook").value.trim(),
+            descriptionAr: $("favEditDesc").value.trim(),
+            sellingPrice: $("favEditSell").value ? Number($("favEditSell").value) : undefined,
+          }),
+        });
+        toast("تم حفظ التعديلات");
+        closeFavoriteEdit();
+        loadFavorites();
+      } catch (e) {
+        toast(e.message || "فشل الحفظ", true);
+      } finally {
+        $("favEditSave").disabled = false;
+      }
+    };
+
     async function loadFavorites() {
       const root = $("favoritesList");
       root.innerHTML = '<p class="hint">جاري التحميل…</p>';
@@ -1207,29 +1293,37 @@ export function renderDashboardPage(storeDomain: string): string {
         rows.forEach((fav) => {
           const listing = fav.listing || {};
           const img = listing.image || (listing.images && listing.images[0]) || "";
+          const score = listing.aiScore != null ? Number(listing.aiScore) : null;
+          const hook = listing.hookAr || "";
           const card = document.createElement("div");
           card.className = "fav-card";
-          const hook = listing.hookAr || (fav.notes && !listing.adCopyAr ? fav.notes : "");
           card.innerHTML =
             '<img src="' + escapeHtml(img) + '" alt="" loading="lazy" />' +
             '<div style="flex:1;min-width:0">' +
-            "<strong style='display:block;line-height:1.35'>" + escapeHtml(fav.title) + "</strong>" +
+            (score != null ? ('<span class="score-badge">' + escapeHtml(String(score)) + "/100</span>") : "") +
+            "<strong style='display:inline;line-height:1.35'>" + escapeHtml(fav.title) + "</strong>" +
             (hook ? ("<div class='sub' style='margin-top:.25rem;color:var(--accent)'>" + escapeHtml(hook) + "</div>") : "") +
             '<div class="sub">' + money(fav.original_price, fav.currency) +
+            (listing.sellingPrice ? (" · بيع " + money(listing.sellingPrice)) : "") +
             " · ID " + escapeHtml(fav.aliexpress_id) + "</div>" +
             '<div class="fav-actions">' +
             '<button class="btn btn-accent fav-import" type="button">رفع Shopify</button>' +
+            '<button class="btn btn-ghost fav-edit" type="button">تعديل</button>' +
             '<button class="btn btn-ghost fav-open" type="button">معاينة</button>' +
             '<button class="btn btn-ghost fav-del" type="button">حذف</button>' +
             "</div></div>";
+          card.querySelector(".fav-edit").onclick = () => openFavoriteEdit(fav);
           card.querySelector(".fav-open").onclick = () => openDrawer(listing);
           card.querySelector(".fav-import").onclick = async () => {
             try {
               const r = await api("/api/favorites/" + fav.id + "/import", {
                 method: "POST",
-                body: JSON.stringify({ force: true }),
+                body: JSON.stringify({
+                  force: true,
+                  sellingPrice: listing.sellingPrice || undefined,
+                }),
               });
-              toast(r.data && r.data.synced ? "تم الرفع من المفضلة" : "تم الحفظ");
+              toast(r.data && r.data.synced ? "تم الرفع على Shopify بالعربي" : "تم الحفظ");
             } catch (e) { toast(e.message || "فشل الرفع", true); }
           };
           card.querySelector(".fav-del").onclick = async () => {

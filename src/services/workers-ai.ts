@@ -1,10 +1,15 @@
 import type { AiFilterResult, AliExpressListing, Env } from "../types";
+import {
+  buildArabicDescriptionHtml,
+  normalizeHookAr,
+} from "../utils/arabic-product";
 
 export interface ProductAiAnalysis extends AiFilterResult {
   suggestedSellingPrice?: number;
   /** Short Saudi-dialect marketing hook (scroll-stopper) */
   hookAr?: string;
   adCopyAr?: string;
+  descriptionAr?: string;
   pros?: string[];
   cons?: string[];
   aiProvider: "workers-ai" | "heuristic";
@@ -80,6 +85,9 @@ export class WorkersAiService {
     score = Math.max(0, Math.min(100, score));
     const approved = score >= 55;
     const shortName = listing.title.split(/[,\-–|]/)[0]?.trim() || listing.title;
+    const hookAr = normalizeHookAr("تعبت من الفوضى؟ هالقطعة تحلها لك بثواني");
+    const adCopyAr = `تخيل ترتّب يومك بدون تعب 😍 ${shortName} — جرّبها الحين ولا تندم.`;
+    const prosAr = pros.length ? pros : ["سهل الاستخدام", "سعر مناسب", "طلب سريع"];
 
     return {
       approved,
@@ -87,11 +95,17 @@ export class WorkersAiService {
       reason: approved
         ? "منتج مناسب للتجربة حسب البيانات المتاحة"
         : "يحتاج مراجعة إضافية قبل الإعلان",
-      suggestedTitle: `🔥 ${shortName} — ترند الحين ولا تفوّتها!`,
-      hookAr: "يا جماعة الخير، هالقطعة صارت ترند ومبيعاتها طايرة!",
+      suggestedTitle: `${shortName} — حل سريع لمشكلة يومية`,
+      hookAr,
       suggestedSellingPrice,
-      adCopyAr: `تخيلوا ترتبون سيارتكم/بيتكم بسهولة 😍 ${shortName} — اطلبها الحين قبل تخلص!`,
-      pros,
+      adCopyAr,
+      descriptionAr: buildArabicDescriptionHtml({
+        hookAr,
+        adCopyAr,
+        pros: prosAr,
+        title: shortName,
+      }),
+      pros: prosAr,
       cons,
       tags: ["heuristic"],
       aiProvider: "heuristic",
@@ -105,16 +119,21 @@ export class WorkersAiService {
     const shipTo = context?.shipToCountry ?? "SA";
     const margin = context?.targetMarginPercent ?? 40;
 
-    const prompt = `أنت خبير دروب شيبنج وكتابة إعلانات TikTok/Snapchat للسوق السعودي (${shipTo}).
+    const prompt = `أنت كاتب إعلانات سعودي حقيقي (TikTok/Snap) للسوق السعودي (${shipTo}).
 حلّل منتج AliExpress وأرجع JSON فقط:
-{"approved":boolean,"score":number,"reason":string,"suggestedTitle":string,"hookAr":string,"suggestedSellingPrice":number,"adCopyAr":string,"pros":string[],"cons":string[],"tags":string[]}
+{"approved":boolean,"score":number,"reason":string,"suggestedTitle":string,"hookAr":string,"suggestedSellingPrice":number,"adCopyAr":string,"descriptionAr":string,"pros":string[],"cons":string[],"tags":string[]}
 
-قواعد اللغة (مهم جدًا):
-- suggestedTitle: عنوان منتج للمتجر بلهجة سعودية طبيعية (مو فصحى رسمية) + هوك قوي قصير
-- hookAr: جملة افتتاحية سعودية توقف السكرول (مثل: يا جماعة الخير / ترا هالقطعة / لا يفوتكم)
-- adCopyAr: نص إعلان 2-3 جمل بلهجة سعودية مع إيموجي مناسب لـ TikTok/Snapchat
-- استخدم كلمات سعودية طبيعية: "الحين"، "مرة"، "يا حبيبي"، "تفوّت"، "طاير"، "كذا" — بدون مبالغة مزعجة
-- احتفظ بأسماء الماركات والموديلات بالإنجليزي (USB, RGB, iPhone…)
+قواعد الهوك hookAr (الأهم):
+- جملة واحدة قصيرة جدًا (6–12 كلمة) بلهجة سعودية بشرية 100%
+- تبدأ بمشكلة يومية يعاني منها العميل ثم تلمّح للحل (مثل: تعبك من …؟ / ليش تتعذب مع …؟ / ترا فيه حل بسيط لـ …)
+- كأنك تكلم صديق — مو إعلان رسمي ولا فصحى ثقيلة
+- ممنوع: جمل طويلة، مبالغة مزيفة، كلمات تسويقية فاضية
+
+قواعد باقي النصوص:
+- suggestedTitle: عنوان متجر عربي سعودي واضح (بدون إيموجي كثير)
+- adCopyAr: جملتين كحد أقصى بلهجة سعودية طبيعية
+- descriptionAr: وصف منتج كامل للمتجر بالعربي (فقرتين + 3-5 نقاط مميزات) بصيغة HTML بسيطة فقط: <p> و <ul><li>
+- استخدم: "الحين"، "مرة"، "تعبك"، "حلها"، "بسيط" — احتفظ بالماركات بالإنجليزي (USB, iPhone…)
 
 قواعد التحليل:
 - approved=true إذا المنتج قابل للبيع (ليس مقلد/سلاح/بالغ)
@@ -146,15 +165,29 @@ Choice: ${listing.isChoice ? "نعم" : "لا"}`;
     const text = this.extractAiText(result);
     const parsed = this.parseJsonFromText(text);
 
+    const pros = Array.isArray(parsed.pros) ? parsed.pros.map(String) : [];
+    const hookAr = normalizeHookAr(String(parsed.hookAr || ""));
+    const adCopyAr = String(parsed.adCopyAr || "");
+    const suggestedTitle = String(parsed.suggestedTitle || listing.title);
+    const descriptionAr =
+      String(parsed.descriptionAr || "").trim() ||
+      buildArabicDescriptionHtml({
+        hookAr,
+        adCopyAr,
+        pros,
+        title: suggestedTitle,
+      });
+
     return {
       approved: Boolean(parsed.approved),
       score: Math.round(Number(parsed.score) || 0),
       reason: String(parsed.reason || "تحليل Workers AI"),
-      suggestedTitle: String(parsed.suggestedTitle || listing.title),
-      hookAr: String(parsed.hookAr || ""),
+      suggestedTitle,
+      hookAr,
       suggestedSellingPrice: Number(parsed.suggestedSellingPrice) || undefined,
-      adCopyAr: String(parsed.adCopyAr || ""),
-      pros: Array.isArray(parsed.pros) ? parsed.pros.map(String) : [],
+      adCopyAr,
+      descriptionAr,
+      pros,
       cons: Array.isArray(parsed.cons) ? parsed.cons.map(String) : [],
       tags: Array.isArray(parsed.tags) ? parsed.tags.map(String) : ["workers-ai"],
       aiProvider: "workers-ai",
