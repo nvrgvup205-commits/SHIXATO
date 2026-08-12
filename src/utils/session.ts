@@ -55,7 +55,13 @@ function timingSafeEqual(a: string, b: string): boolean {
 }
 
 function sessionSecret(env: Env): string {
-  return env.API_KEY || env.DASHBOARD_PIN || "shixato-dev-secret";
+  // Stable secret — not tied to API_KEY rotation; supports multiple concurrent logins.
+  const parts = [
+    env.SUPABASE_URL?.trim(),
+    env.SHOPIFY_STORE_DOMAIN?.trim(),
+    "shixato-dashboard-session-v2",
+  ].filter(Boolean);
+  return parts.join("|") || "shixato-dev-secret";
 }
 
 export function getEnvDashboardPin(env: Env): string {

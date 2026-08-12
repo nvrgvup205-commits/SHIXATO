@@ -86,6 +86,29 @@ describe("AliExpressService.parseSearchHtml", () => {
     expect(row.isFreeShipping).toBe(true);
   });
 
+  it("extracts all gallery images from search card images array", () => {
+    const fixture = `
+      <html><script>
+      {"itemList":{"content":[{
+        "productId":"1005006967568156",
+        "title":{"displayTitle":"USB Charger"},
+        "image":{"imgUrl":"//ae-pic-a1.aliexpress-media.com/kf/main.jpg"},
+        "images":[
+          {"imgUrl":"//ae-pic-a1.aliexpress-media.com/kf/main.jpg"},
+          {"imgUrl":"//ae-pic-a1.aliexpress-media.com/kf/alt1.jpg"},
+          {"imgUrl":"//ae-pic-a1.aliexpress-media.com/kf/alt2.jpg"}
+        ],
+        "prices":{"salePrice":{"currencyCode":"USD","minPrice":1.32}}
+      }]}
+      </script></html>
+    `;
+
+    const row = new AliExpressService().parseSearchHtml(fixture)[0]!;
+    expect(row.images).toHaveLength(3);
+    expect(row.images![0]).toMatch(/^https:\/\/.*main\.jpg/);
+    expect(row.images![1]).toMatch(/alt1/);
+  });
+
   it("marks explicit free shipping from Free_Shipping_atm", () => {
     const fixture = `
       <html><script>

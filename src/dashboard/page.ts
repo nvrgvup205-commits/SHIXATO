@@ -132,6 +132,23 @@ export function renderDashboardPage(storeDomain: string): string {
     .product-details span { display: block; }
     .ship-free { color: var(--ok); font-weight: 600; }
     .ship-paid { color: #8a4b12; font-weight: 600; }
+    .img-gallery {
+      display: flex; gap: .35rem; flex-wrap: wrap; margin: .5rem 0;
+      max-height: 130px; overflow-y: auto;
+    }
+    .img-gallery img {
+      width: 56px; height: 56px; object-fit: cover; border-radius: 8px;
+      border: 1px solid var(--line); cursor: pointer;
+    }
+    .img-gallery img.active {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 2px rgba(15,138,106,.25);
+    }
+    .add-preview {
+      margin-top: 1rem; padding: 1rem; border: 1px solid var(--line);
+      border-radius: 14px; background: rgba(255,255,255,.55);
+    }
+    .add-preview .img-gallery img { width: 72px; height: 72px; }
     .badges { display: flex; flex-wrap: wrap; gap: .25rem; margin-top: .4rem; }
     .badge {
       font-size: .68rem; font-weight: 700; padding: .12rem .4rem; border-radius: 999px;
@@ -190,7 +207,7 @@ export function renderDashboardPage(storeDomain: string): string {
 
     <section id="gate" class="panel gate">
       <h2 style="margin:0 0 .35rem;font-family:var(--display);letter-spacing:-.03em;">أدخل الرقم السري</h2>
-      <p class="hint">اكتب الرقم ثم اضغط دخول — الافتراضي: <strong>1111</strong></p>
+      <p class="hint" id="loginHint">اكتب الرقم ثم اضغط دخول — الافتراضي: <strong>1111</strong>. يمكن لعدة أشخاص الدخول معًا (لا يوجد قفل جلسة).</p>
       <input id="pin" class="pin-input" type="password" inputmode="numeric" maxlength="12" placeholder="••••" autocomplete="one-time-code" />
       <div style="margin-top:.9rem">
         <button class="btn btn-primary" id="loginBtn" type="button" style="width:100%">دخول وشكراً</button>
@@ -200,6 +217,7 @@ export function renderDashboardPage(storeDomain: string): string {
     <section id="app" class="hidden">
       <div class="tabs">
         <button class="tab active" data-tab="search" type="button">بحث المنتجات</button>
+        <button class="tab" data-tab="add" type="button">إضافة منتج</button>
         <button class="tab" data-tab="catalog" type="button">منتجاتي</button>
         <button class="tab" data-tab="logs" type="button">سجلات الرفع</button>
         <button class="tab" data-tab="settings" type="button">إعدادات</button>
@@ -338,6 +356,18 @@ export function renderDashboardPage(storeDomain: string): string {
         <div id="results" class="grid"></div>
       </section>
 
+      <section id="tab-add" class="panel hidden">
+        <p class="hint">ألصق <strong>رابط المنتج</strong> من علي إكسبريس أو <strong>رقم المنتج</strong> فقط — ثم معاينة أو رفع مباشرة إلى Shopify.</p>
+        <div style="display:flex;gap:.6rem;flex-wrap:wrap;margin-bottom:.75rem">
+          <input id="addUrl" type="url" placeholder="https://www.aliexpress.com/item/1005006123456789.html" style="flex:1 1 280px" />
+          <button class="btn btn-ghost" id="addPreviewBtn" type="button">معاينة</button>
+          <button class="btn btn-accent" id="addImportBtn" type="button">رفع إلى Shopify</button>
+        </div>
+        <label for="addSell">سعر البيع (اختياري)</label>
+        <input id="addSell" type="number" min="0" step="0.01" placeholder="اتركه فارغًا للهامش التلقائي" />
+        <div id="addPreview" class="add-preview hidden"></div>
+      </section>
+
       <section id="tab-catalog" class="panel hidden">
         <div style="display:flex;gap:.6rem;flex-wrap:wrap">
           <input id="catalogQ" type="search" placeholder="فلترة منتجاتي..." style="flex:1" />
@@ -396,6 +426,7 @@ export function renderDashboardPage(storeDomain: string): string {
   <aside class="drawer" id="drawer">
     <button class="btn btn-ghost" id="closeDrawer" type="button">إغلاق</button>
     <img id="dImg" alt="" />
+    <div class="img-gallery" id="dGallery"></div>
     <h2 id="dTitle"></h2>
     <div class="price" id="dPrice"></div>
     <div class="stats">
@@ -419,7 +450,7 @@ export function renderDashboardPage(storeDomain: string): string {
   <div class="toast" id="toast"></div>
 
   <script>
-    const state = { listing: null, lastSearch: null };
+    const state = { listing: null, lastSearch: null, addPreview: null };
 
     const $ = (id) => document.getElementById(id);
     const toast = (msg, err=false) => {
@@ -453,7 +484,14 @@ export function renderDashboardPage(storeDomain: string): string {
           showApp(true);
           return;
         }
-      } catch (_) {}
+        if (me.data && me.data.pinSource === "supabase") {
+          $("loginHint").innerHTML =
+            "الرقم محفوظ في <strong>Supabase</strong> (قد لا يكون 1111). يمكن لعدة أشخاص الدخول معًا.";
+        }
+      } catch (_) {
+        $("loginHint").textContent =
+          "تعذّر الاتصال بالخادم — تأكد أن Worker يعمل ثم أعد المحاولة.";
+      }
       showApp(false);
     }
 
@@ -479,7 +517,7 @@ export function renderDashboardPage(storeDomain: string): string {
       btn.addEventListener("click", () => {
         document.querySelectorAll(".tab").forEach((b) => b.classList.remove("active"));
         btn.classList.add("active");
-        ["search","catalog","logs","settings"].forEach((name) => {
+        ["search","add","catalog","logs","settings"].forEach((name) => {
           $("tab-" + name).classList.toggle("hidden", btn.dataset.tab !== name);
         });
         if (btn.dataset.tab === "catalog") loadCatalog();
@@ -640,7 +678,9 @@ export function renderDashboardPage(storeDomain: string): string {
           '<div class="sub">' +
             escapeHtml(item.sold || (item.soldCount != null ? (item.soldCount + " sold") : "")) +
             (item.rating != null ? (" · ★ " + item.rating) : "") +
+            (item.reviewCount != null ? (" · " + item.reviewCount + " تقييم") : "") +
             (item.negativeRateEstimate != null ? (" · سلبي≈" + item.negativeRateEstimate + "%") : "") +
+            (item.images && item.images.length > 1 ? (" · " + item.images.length + " صور") : "") +
           "</div>" +
           (detailsHtml ? ('<div class="product-details">' + detailsHtml + "</div>") : "") +
           '<div class="badges">' + badgeHtml + "</div>" +
@@ -744,9 +784,31 @@ export function renderDashboardPage(storeDomain: string): string {
       }
     };
 
+    function renderImageGallery(container, images, onSelect) {
+      container.innerHTML = "";
+      if (!images || !images.length) return;
+      images.forEach((src, i) => {
+        const thumb = document.createElement("img");
+        thumb.src = src;
+        thumb.alt = "";
+        if (i === 0) thumb.classList.add("active");
+        thumb.onclick = (e) => {
+          e.stopPropagation();
+          onSelect(src);
+          container.querySelectorAll("img").forEach((t) => t.classList.remove("active"));
+          thumb.classList.add("active");
+        };
+        container.appendChild(thumb);
+      });
+    }
+
     function openDrawer(item) {
       state.listing = item;
-      $("dImg").src = item.image || "";
+      const imgs = (item.images && item.images.length)
+        ? item.images
+        : (item.image ? [item.image] : []);
+      $("dImg").src = imgs[0] || "";
+      renderImageGallery($("dGallery"), imgs, (src) => { $("dImg").src = src; });
       $("dTitle").textContent = item.title;
       $("dPrice").textContent = money(item.originalPrice, item.currency) +
         (item.listPrice ? (" · كان " + money(item.listPrice, item.currency)) : "") +
@@ -825,6 +887,99 @@ export function renderDashboardPage(storeDomain: string): string {
       } catch (e) { toast(e.message || "فشل التحميل", true); }
     }
     $("refreshCatalog").onclick = loadCatalog;
+
+    function renderAddPreview(product) {
+      const box = $("addPreview");
+      if (!product) {
+        box.classList.add("hidden");
+        box.innerHTML = "";
+        return;
+      }
+      box.classList.remove("hidden");
+      const imgs = (product.images || []).slice(0, 16);
+      const gallery = imgs.map((src) =>
+        '<img src="' + escapeHtml(src) + '" alt="" loading="lazy" />'
+      ).join("");
+      const reviews = product.attributes?.reviewCount || product.attributes?.rating;
+      box.innerHTML =
+        "<h3 style=\"margin:0 0 .5rem\">" + escapeHtml(product.title) + "</h3>" +
+        '<div class="price">' + money(product.originalPrice, product.currency) +
+        (product.images ? (" · " + product.images.length + " صورة") : "") + "</div>" +
+        '<div class="img-gallery" style="margin-top:.5rem">' + gallery + "</div>" +
+        '<p class="hint" style="margin-top:.5rem">ID: ' + escapeHtml(product.aliexpressId) + "</p>";
+    }
+
+    async function previewAddProduct() {
+      const raw = $("addUrl").value.trim();
+      if (!raw) return toast("ألصق رابط أو رقم المنتج", true);
+      $("addPreviewBtn").disabled = true;
+      try {
+        const res = await api("/api/products/preview", {
+          method: "POST",
+          body: JSON.stringify(
+            /^\d{6,20}$/.test(raw) ? { aliexpressId: raw } : { url: raw },
+          ),
+        });
+        state.addPreview = res.data;
+        renderAddPreview(state.addPreview);
+        toast("تم جلب المنتج — " + (state.addPreview.images?.length || 0) + " صورة");
+      } catch (e) {
+        state.addPreview = null;
+        renderAddPreview(null);
+        toast(e.message || "فشل المعاينة — جرّب الرابط أو استخدم البحث", true);
+      } finally {
+        $("addPreviewBtn").disabled = false;
+      }
+    }
+
+    async function importAddProduct() {
+      const raw = $("addUrl").value.trim();
+      if (!raw && !state.addPreview) return toast("ألصق رابط أو رقم المنتج", true);
+      $("addImportBtn").disabled = true;
+      try {
+        const selling = $("addSell").value ? Number($("addSell").value) : undefined;
+        const body = state.addPreview
+          ? {
+              aliexpressId: state.addPreview.aliexpressId,
+              force: true,
+              sellingPrice: selling,
+              listing: {
+                aliexpressId: state.addPreview.aliexpressId,
+                title: state.addPreview.title,
+                url: state.addPreview.url,
+                image: (state.addPreview.images && state.addPreview.images[0]) || "",
+                images: state.addPreview.images || [],
+                originalPrice: state.addPreview.originalPrice,
+                currency: state.addPreview.currency,
+              },
+            }
+          : {
+              ...( /^\d{6,20}$/.test(raw) ? { aliexpressId: raw } : { url: raw }),
+              force: true,
+              sellingPrice: selling,
+            };
+        const res = await api("/api/products/import", {
+          method: "POST",
+          body: JSON.stringify(body),
+        });
+        toast(res.data && res.data.synced ? "تم الرفع إلى Shopify" : "تم الحفظ");
+        $("addUrl").value = "";
+        $("addSell").value = "";
+        state.addPreview = null;
+        renderAddPreview(null);
+      } catch (e) {
+        toast(e.message || "فشل الرفع", true);
+      } finally {
+        $("addImportBtn").disabled = false;
+      }
+    }
+
+    $("addPreviewBtn").onclick = previewAddProduct;
+    $("addImportBtn").onclick = importAddProduct;
+    $("addUrl").addEventListener("keydown", (e) => {
+      if (e.key === "Enter") previewAddProduct();
+    });
+
     $("catalogQ").addEventListener("keydown", (e) => { if (e.key === "Enter") loadCatalog(); });
 
     async function loadLogs() {

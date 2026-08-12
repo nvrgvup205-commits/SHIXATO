@@ -37,7 +37,22 @@ auth.post("/logout", async (c) => {
 auth.get("/me", async (c) => {
   const cookie = getCookie(c, "shixato_session");
   const ok = await verifySessionToken(c.env, cookie);
-  return c.json({ ok: true, data: { authenticated: ok } });
+  let pinSource: "supabase" | "env" = "env";
+  try {
+    const db = new SupabaseService(c.env);
+    const stored = await db.getSetting("dashboard_pin");
+    if (stored?.trim()) pinSource = "supabase";
+  } catch {
+    // Supabase unavailable — env PIN still works
+  }
+  return c.json({
+    ok: true,
+    data: {
+      authenticated: ok,
+      pinSource,
+      multiSession: true,
+    },
+  });
 });
 
 /** Change dashboard PIN (stored in Supabase shixato.app_settings) */

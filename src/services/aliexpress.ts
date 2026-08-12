@@ -429,7 +429,9 @@ export class AliExpressService {
       `Product ${aliexpressId}`;
 
     const imageObj = item.image as Record<string, unknown> | undefined;
-    const image = this.normalizeImageUrl(this.asString(imageObj?.imgUrl));
+    const primaryImage = this.normalizeImageUrl(this.asString(imageObj?.imgUrl));
+    const cardImages = this.collectSearchCardImages(item, primaryImage);
+    const image = cardImages[0] || "";
 
     const prices = item.prices as Record<string, unknown> | undefined;
     const salePrice = prices?.salePrice as Record<string, unknown> | undefined;
@@ -527,7 +529,7 @@ export class AliExpressService {
       title,
       url,
       image,
-      images: image ? [image] : [],
+      images: cardImages,
       originalPrice: sale,
       listPrice: Number.isFinite(listPrice) && listPrice > 0 ? listPrice : undefined,
       currency,
@@ -554,6 +556,28 @@ export class AliExpressService {
       isLocalWarehouse: shippingSp.isLocalWarehouse,
       storeLaunchDate: this.asString(item.lunchTime) || undefined,
     };
+  }
+
+  private collectSearchCardImages(
+    item: Record<string, unknown>,
+    primary?: string,
+  ): string[] {
+    const out: string[] = [];
+    if (primary) out.push(primary);
+
+    const imagesArr = item.images as Array<Record<string, unknown>> | undefined;
+    if (Array.isArray(imagesArr)) {
+      for (const img of imagesArr) {
+        const url = this.normalizeImageUrl(this.asString(img.imgUrl));
+        if (url) out.push(url);
+      }
+    }
+
+    const imageObj = item.image as Record<string, unknown> | undefined;
+    const main = this.normalizeImageUrl(this.asString(imageObj?.imgUrl));
+    if (main) out.push(main);
+
+    return [...new Set(out.filter(Boolean))];
   }
 
   private parseShippingFromSellingPoints(
