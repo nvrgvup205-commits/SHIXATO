@@ -1,9 +1,19 @@
 /** SHIXATO admin dashboard — PIN login + rich AliExpress filters */
 
+import { DROPSHIP_PRESETS } from "../data/dropship-presets";
 import { PRODUCT_CATEGORIES } from "../data/categories";
 
 export function renderDashboardPage(storeDomain: string): string {
   const store = storeDomain.replace(/^https?:\/\//, "").replace(/\/$/, "");
+  const presetsJson = JSON.stringify(
+    DROPSHIP_PRESETS.map((p) => ({
+      id: p.id,
+      labelAr: p.labelAr,
+      emoji: p.emoji,
+      descAr: p.descAr,
+      tipAr: p.tipAr,
+    })),
+  );
   const categoryOptions = [
     `<option value="">— اختَر فئة (اختياري مع كلمة بحث) —</option>`,
     ...PRODUCT_CATEGORIES.map(
@@ -191,6 +201,58 @@ export function renderDashboardPage(storeDomain: string): string {
     .stat b { display: block; font-size: .78rem; color: var(--muted); font-weight: 600; }
     details.more { margin-top: .7rem; }
     details.more summary { cursor: pointer; font-weight: 700; color: var(--accent); }
+    .smart-search {
+      margin: .75rem 0 1rem; padding: 1rem; border-radius: 16px;
+      border: 1px dashed rgba(15,138,106,.35); background: rgba(15,138,106,.06);
+    }
+    .search-topbar {
+      display: flex; gap: .5rem; flex-wrap: wrap; align-items: center;
+      position: sticky; top: 0; z-index: 5; padding: .65rem;
+      margin: -.3rem -.2rem .75rem; border-radius: 14px;
+      background: rgba(255,255,255,.92); border: 1px solid var(--line);
+      backdrop-filter: blur(12px); box-shadow: 0 8px 24px rgba(16,35,31,.06);
+    }
+  .search-topbar #query { flex: 1 1 220px; min-width: 160px; margin: 0; }
+  .search-topbar select { width: auto; min-width: 110px; margin: 0; padding: .65rem .7rem; }
+  .search-topbar .btn { white-space: nowrap; padding: .65rem .9rem; }
+  .preset-chips { display: flex; gap: .35rem; flex-wrap: wrap; }
+  .preset-chip {
+    border: 1px solid var(--line); background: #fff; border-radius: 999px;
+    padding: .45rem .75rem; font-weight: 700; font-size: .82rem; cursor: pointer;
+  }
+  .preset-chip:hover, .preset-chip.active { border-color: var(--accent); background: #eef8f4; }
+  .preset-chip:disabled { opacity: .55; cursor: wait; }
+  #aiStatusHint { margin: 0 0 .5rem; }
+  .ai-panel {
+    margin: .75rem 0; padding: .75rem; border-radius: 12px;
+    border: 1px solid rgba(15,138,106,.25); background: #f3fbf7; font-size: .88rem;
+  }
+  .ai-panel .score { font-size: 1.4rem; font-weight: 800; color: var(--accent); }
+  .ai-panel ul { margin: .35rem 0 0; padding-inline-start: 1.1rem; }
+    .smart-search h3 {
+      margin: 0 0 .35rem; font-family: var(--display); font-size: 1.05rem;
+    }
+    .preset-row { display: flex; gap: .55rem; flex-wrap: wrap; margin-top: .65rem; }
+    .preset-btn {
+      flex: 1 1 180px; text-align: start; padding: .75rem .85rem;
+      border-radius: 14px; border: 1px solid var(--line); background: #fff;
+      cursor: pointer; transition: transform .15s, box-shadow .15s, border-color .15s;
+    }
+    .preset-btn:hover { transform: translateY(-2px); box-shadow: var(--shadow); border-color: var(--accent); }
+    .preset-btn:disabled { opacity: .55; cursor: wait; transform: none; }
+    .preset-btn .grade { font-weight: 800; font-size: .95rem; display: block; }
+    .preset-btn .desc { font-size: .78rem; color: var(--muted); margin-top: .2rem; line-height: 1.35; }
+    #presetTip {
+      margin-top: .55rem; padding: .55rem .7rem; border-radius: 10px;
+      background: rgba(232,255,87,.35); font-size: .84rem; line-height: 1.45;
+    }
+    .fav-card {
+      display: flex; gap: .75rem; align-items: flex-start; padding: .75rem;
+      border: 1px solid var(--line); border-radius: 14px; background: #fff; margin-bottom: .65rem;
+    }
+    .fav-card img { width: 72px; height: 72px; object-fit: cover; border-radius: 10px; flex-shrink: 0; }
+    .fav-actions { display: flex; gap: .4rem; flex-wrap: wrap; margin-top: .45rem; }
+    .fav-actions .btn { padding: .45rem .7rem; font-size: .82rem; }
     @keyframes rise { from { opacity: 0; transform: translateY(12px);} to { opacity: 1; transform: none;} }
     @keyframes pop { from { opacity: 0; transform: scale(.97);} to { opacity: 1; transform: none;} }
   </style>
@@ -217,6 +279,7 @@ export function renderDashboardPage(storeDomain: string): string {
     <section id="app" class="hidden">
       <div class="tabs">
         <button class="tab active" data-tab="search" type="button">بحث المنتجات</button>
+        <button class="tab" data-tab="favorites" type="button">المفضلة للمراجعة</button>
         <button class="tab" data-tab="add" type="button">إضافة منتج</button>
         <button class="tab" data-tab="catalog" type="button">منتجاتي</button>
         <button class="tab" data-tab="logs" type="button">سجلات الرفع</button>
@@ -224,23 +287,35 @@ export function renderDashboardPage(storeDomain: string): string {
       </div>
 
       <section id="tab-search" class="panel">
-        <div class="filters" style="margin-bottom:.75rem">
-          <div class="wide">
-            <label for="category">الفئة</label>
-            <select id="category">${categoryOptions}</select>
-          </div>
-          <div class="wide">
-            <label for="query">كلمة البحث (اختياري إذا اخترت فئة)</label>
-            <div style="display:flex;gap:.6rem;flex-wrap:wrap">
-              <input id="query" type="search" placeholder="اتركه فارغًا لاستخدام الفئة… أو اكتب كلمة مثل phone case" style="flex:1 1 240px" />
-              <button class="btn btn-accent" id="searchBtn" type="button">بحث بالفلاتر</button>
-            </div>
-          </div>
+        <div class="search-topbar">
+          <input id="query" type="search" placeholder="ابحث… أو اضغط 🥈 للبحث الذكي" />
+          <select id="shipToCountry" title="الشحن إلى">
+            <option value="SA" selected>🇸🇦 SA</option>
+            <option value="AE">🇦🇪 AE</option>
+            <option value="EG">🇪🇬 EG</option>
+            <option value="US">🇺🇸 US</option>
+          </select>
+          <select id="locale" title="لغة العناوين">
+            <option value="ar" selected>عربي</option>
+            <option value="en">EN</option>
+          </select>
+          <div class="preset-chips" id="presetButtons"></div>
+          <button class="btn btn-accent" id="searchBtn" type="button">بحث</button>
         </div>
-        <p class="hint">لو كلمة البحث فاضية: لازم تختار <strong>فئة</strong> — ويجيب تصنيفات تحتها مع باقي الفلاتر كما هي.</p>
+        <div id="presetTip" class="hidden"></div>
+        <p class="hint" id="aiStatusHint">العناوين من ar.aliexpress.com · البحث الذكي يجلب صفحات متعددة ويرتّب النتائج</p>
+
+        <details class="more" id="advancedFilters">
+          <summary>فلاتر متقدمة + فئة (اختياري)</summary>
+          <div class="filters" style="margin-top:.75rem;margin-bottom:.5rem">
+            <div class="wide">
+              <label for="category">الفئة</label>
+              <select id="category">${categoryOptions}</select>
+            </div>
+            <label class="check wide"><input id="strictFilters" type="checkbox" /> فلتر صارم (قد يقلّل النتائج)</label>
+          </div>
 
         <div class="filters" id="filters">
-          <div>
             <label for="sort">الترتيب</label>
             <select id="sort">
               <option value="orders" selected>الأكثر مبيعًا</option>
@@ -267,18 +342,6 @@ export function renderDashboardPage(storeDomain: string): string {
               <option value="EUR">EUR</option>
               <option value="GBP">GBP</option>
               <option value="EGP">EGP</option>
-            </select>
-          </div>
-          <div>
-            <label for="shipToCountry">بلد الشحن إلى</label>
-            <select id="shipToCountry">
-              <option value="SA" selected>السعودية SA</option>
-              <option value="AE">الإمارات AE</option>
-              <option value="EG">مصر EG</option>
-              <option value="US">أمريكا US</option>
-              <option value="GB">بريطانيا GB</option>
-              <option value="DE">ألمانيا DE</option>
-              <option value="FR">فرنسا FR</option>
             </select>
           </div>
           <div>
@@ -341,8 +404,9 @@ export function renderDashboardPage(storeDomain: string): string {
           <label class="check"><input id="requireViralBadge" type="checkbox" /> منتجات فايرل / رائجة</label>
           <label class="check"><input id="requireFreeShippingBadge" type="checkbox" /> شارة شحن مجاني</label>
         </div>
+        </details>
 
-        <p class="hint">نصيحة: ابدأ بفئة + ترتيب فقط، ولو ما في نتائج خفّف «كلمات يجب أن تظهر» وعدد التقييمات/المبيعات — كثير من الفلاتر المحلية تستبعد كل البطاقات.</p>
+        <p class="hint">نصيحة: اترك «فلتر صارم» غير مفعّل لنتائج أكثر — البحث الذكي 🥈 هو الأسرع.</p>
         <div id="searchStatus" class="hint"></div>
         <div id="searchUrlRow" class="hidden" style="margin:.35rem 0">
           <a class="btn btn-ghost" id="openSearchAe" href="#" target="_blank" rel="noopener" style="text-decoration:none;font-size:.85rem">
@@ -354,6 +418,14 @@ export function renderDashboardPage(storeDomain: string): string {
           <button class="btn btn-ghost" id="clearLocalFiltersBtn" type="button">مسح الفلاتر المحلية القاسية</button>
         </div>
         <div id="results" class="grid"></div>
+      </section>
+
+      <section id="tab-favorites" class="panel hidden">
+        <p class="hint">منتجات حفظتها للمراجعة قبل الرفع إلى Shopify. راجعها ثم ارفع أو احذف.</p>
+        <div style="display:flex;gap:.55rem;flex-wrap:wrap;margin-bottom:.75rem">
+          <button class="btn btn-ghost" id="refreshFavorites" type="button">تحديث المفضلة</button>
+        </div>
+        <div id="favoritesList"></div>
       </section>
 
       <section id="tab-add" class="panel hidden">
@@ -439,10 +511,17 @@ export function renderDashboardPage(storeDomain: string): string {
     </div>
     <div class="badges" id="dBadges"></div>
     <div class="hint" id="dShipDetail" style="margin-top:.5rem"></div>
+    <div id="dAiPanel" class="ai-panel hidden"></div>
+    <button class="btn btn-ghost" id="aiAnalyzeBtn" type="button" style="width:100%;margin-top:.65rem">🤖 حلّل بالذكاء الاصطناعي (Cloudflare)</button>
     <label for="dSell" style="margin-top:1rem">سعر البيع (اختياري)</label>
     <input id="dSell" type="number" min="0" step="0.01" placeholder="اتركه فارغًا للهامش التلقائي" />
+    <label class="check" style="margin-top:.65rem">
+      <input id="dAlsoFavorite" type="checkbox" />
+      أضف للمفضلة أيضًا بعد الرفع (للمراجعة لاحقًا)
+    </label>
     <div style="display:flex;gap:.55rem;flex-wrap:wrap;margin-top:.8rem">
       <button class="btn btn-accent" id="importBtn" type="button">رفع إلى Shopify</button>
+      <button class="btn btn-ghost" id="favoriteBtn" type="button">حفظ في المفضلة فقط</button>
       <a class="btn btn-ghost" id="openAe" href="#" target="_blank" rel="noopener" style="text-decoration:none;text-align:center">فتح علي إكسبريس</a>
     </div>
     <p class="hint" id="dHint"></p>
@@ -450,7 +529,8 @@ export function renderDashboardPage(storeDomain: string): string {
   <div class="toast" id="toast"></div>
 
   <script>
-    const state = { listing: null, lastSearch: null, addPreview: null };
+    const PRESETS = ${presetsJson};
+    const state = { listing: null, lastSearch: null, addPreview: null, lastPreset: null };
 
     const $ = (id) => document.getElementById(id);
     const toast = (msg, err=false) => {
@@ -547,11 +627,12 @@ export function renderDashboardPage(storeDomain: string): string {
       btn.addEventListener("click", () => {
         document.querySelectorAll(".tab").forEach((b) => b.classList.remove("active"));
         btn.classList.add("active");
-        ["search","add","catalog","logs","settings"].forEach((name) => {
+        ["search","favorites","add","catalog","logs","settings"].forEach((name) => {
           $("tab-" + name).classList.toggle("hidden", btn.dataset.tab !== name);
         });
         if (btn.dataset.tab === "catalog") loadCatalog();
         if (btn.dataset.tab === "logs") loadLogs();
+        if (btn.dataset.tab === "favorites") loadFavorites();
       });
     });
 
@@ -563,6 +644,7 @@ export function renderDashboardPage(storeDomain: string): string {
     }
 
     function collectFilters() {
+      const strict = $("strictFilters").checked;
       return {
         query: $("query").value.trim(),
         category: $("category").value || undefined,
@@ -589,7 +671,119 @@ export function renderDashboardPage(storeDomain: string): string {
         excludeKeywords: $("excludeKeywords").value.trim() || undefined,
         targetSellingPrice: num("targetSellingPrice"),
         minMarginPercent: num("minMarginPercent"),
+        locale: $("locale").value || "ar",
+        applyUrlFilters: strict,
+        filterMode: strict ? "strict" : "soft",
+        fetchPages: strict ? 1 : 2,
       };
+    }
+
+    function applyFiltersToForm(filters) {
+      $("category").value = "";
+      $("query").value = filters.query || "";
+      if (filters.sort) $("sort").value = filters.sort;
+      if (filters.locale) $("locale").value = filters.locale;
+      const setNum = (id, v) => { $(id).value = v != null ? String(v) : ""; };
+      setNum("minPrice", filters.minPrice);
+      setNum("maxPrice", filters.maxPrice);
+      if (filters.currency) $("currency").value = filters.currency;
+      if (filters.shipToCountry) $("shipToCountry").value = filters.shipToCountry;
+      $("shipFromCountry").value = filters.shipFromCountry || "";
+      setNum("minSold", filters.minSold);
+      setNum("maxSold", filters.maxSold);
+      setNum("minRating", filters.minRating);
+      setNum("minReviews", filters.minReviews);
+      setNum("maxNegativeRate", filters.maxNegativeRate);
+      setNum("minDiscountPercent", filters.minDiscountPercent);
+      setNum("targetSellingPrice", filters.targetSellingPrice);
+      setNum("minMarginPercent", filters.minMarginPercent);
+      $("includeKeywords").value = filters.includeKeywords || "";
+      $("excludeKeywords").value = filters.excludeKeywords || "";
+      const checks = ["freeShipping","choiceOnly","highRatedSellers","unitPrice","requireViralBadge","requireFreeShippingBadge"];
+      checks.forEach((id) => { $(id).checked = !!filters[id]; });
+    }
+
+    function showPresetTip(text) {
+      const el = $("presetTip");
+      if (!text) { el.classList.add("hidden"); el.textContent = ""; return; }
+      el.textContent = text;
+      el.classList.remove("hidden");
+    }
+
+    function renderPresetButtons() {
+      const root = $("presetButtons");
+      root.innerHTML = "";
+      PRESETS.forEach((p) => {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "preset-chip";
+        btn.dataset.grade = p.id;
+        btn.textContent = p.emoji + " " + p.labelAr;
+        btn.title = p.descAr;
+        btn.onclick = () => runSmartSearch(p.id);
+        root.appendChild(btn);
+      });
+    }
+
+    async function saveFavorite(listing, presetGrade) {
+      await api("/api/favorites", {
+        method: "POST",
+        body: JSON.stringify({ listing, presetGrade: presetGrade || null }),
+      });
+    }
+
+    async function runSmartSearch(grade) {
+      document.querySelectorAll(".preset-chip").forEach((b) => { b.disabled = true; });
+      const preset = PRESETS.find((p) => p.id === grade);
+      showPresetTip(preset ? ("💡 " + preset.tipAr) : "");
+      $("searchStatus").textContent = "جاري البحث الذكي (" + (preset?.labelAr || grade) + ")…";
+      $("filterActions").classList.add("hidden");
+      try {
+        const res = await api("/api/favorites/smart-search", {
+          method: "POST",
+          body: JSON.stringify({
+            grade,
+            shipToCountry: $("shipToCountry").value,
+            currency: $("currency").value,
+          }),
+        });
+        const data = res.data || {};
+        state.lastSearch = data;
+        state.lastPreset = grade;
+        const items = data.results || [];
+        applyFiltersToForm({
+          ...data.filtersApplied,
+          query: data.query,
+          locale: "ar",
+        });
+        const via = data.presetLabelAr ? (" · " + data.presetLabelAr) : "";
+        $("searchStatus").textContent =
+          "نتائج ذكية: " + (data.totalAfterFilter ?? items.length) +
+          " بعد الفلتر / " + (data.totalParsed ?? items.length) + " قبل الفلتر" +
+          " · بحث: " + (data.query || "") + via +
+          (data.warning ? (" — " + data.warning) : "");
+
+        if (data.searchUrl) {
+          $("searchUrlRow").classList.remove("hidden");
+          $("openSearchAe").href = data.searchUrl;
+        } else {
+          $("searchUrlRow").classList.add("hidden");
+        }
+
+        const wiped = (data.totalParsed > 0 && items.length === 0);
+        $("filterActions").classList.toggle("hidden", !wiped && !data.warning);
+        renderResults(items);
+        if (!items.length) {
+          toast(data.warning || "لا نتائج — جرّب درجة أخف (مبتدئ)", true);
+        } else {
+          toast("تم العثور على " + items.length + " منتج");
+        }
+      } catch (e) {
+        $("searchStatus").textContent = "";
+        toast(e.message || "فشل البحث الذكي", true);
+      } finally {
+        document.querySelectorAll(".preset-chip").forEach((b) => { b.disabled = false; });
+      }
     }
 
     function money(n, c="USD") {
@@ -851,7 +1045,9 @@ export function renderDashboardPage(storeDomain: string): string {
       ).join("");
       $("dSell").value = "";
       $("openAe").href = aeProductUrl(item);
-      $("dHint").textContent = "الرفع يستخدم بيانات بطاقة البحث + فلاترك. ID: " + item.aliexpressId;
+      $("dHint").textContent = "الرفع يستخدم بيانات بطاقة البحث. ID: " + item.aliexpressId;
+      $("dAiPanel").classList.add("hidden");
+      $("dAiPanel").innerHTML = "";
       $("drawer").classList.add("open");
       $("backdrop").classList.add("open");
     }
@@ -862,6 +1058,44 @@ export function renderDashboardPage(storeDomain: string): string {
     }
     $("closeDrawer").onclick = closeDrawer;
     $("backdrop").onclick = closeDrawer;
+
+    $("aiAnalyzeBtn").onclick = async () => {
+      if (!state.listing) return;
+      $("aiAnalyzeBtn").disabled = true;
+      const panel = $("dAiPanel");
+      panel.classList.remove("hidden");
+      panel.innerHTML = "جاري التحليل بالذكاء الاصطناعي…";
+      try {
+        const res = await api("/api/ai/analyze", {
+          method: "POST",
+          body: JSON.stringify({
+            listing: state.listing,
+            shipToCountry: $("shipToCountry").value,
+            targetMarginPercent: num("minMarginPercent") || 40,
+          }),
+        });
+        const a = res.data || {};
+        const pros = (a.pros || []).map((x) => "<li>✅ " + escapeHtml(x) + "</li>").join("");
+        const cons = (a.cons || []).map((x) => "<li>⚠️ " + escapeHtml(x) + "</li>").join("");
+        panel.innerHTML =
+          '<div class="score">' + escapeHtml(String(a.score || 0)) + '/100 ' +
+          (a.approved ? "✅ مناسب" : "⏸ راجع") + "</div>" +
+          "<div>" + escapeHtml(a.reason || "") + "</div>" +
+          (a.suggestedTitle ? ("<div style='margin-top:.4rem'><b>عنوان مقترح:</b> " + escapeHtml(a.suggestedTitle) + "</div>") : "") +
+          (a.suggestedSellingPrice ? ("<div><b>سعر بيع مقترح:</b> " + money(a.suggestedSellingPrice) + "</div>") : "") +
+          (a.adCopyAr ? ("<div style='margin-top:.4rem'><b>نص إعلان:</b> " + escapeHtml(a.adCopyAr) + "</div>") : "") +
+          (pros ? ("<ul>" + pros + "</ul>") : "") +
+          (cons ? ("<ul>" + cons + "</ul>") : "") +
+          '<div class="sub">' + (a.aiEnabled ? "Workers AI" : "تحليل تلقائي (فعّل Workers AI)") + "</div>";
+        if (a.suggestedSellingPrice) $("dSell").value = String(a.suggestedSellingPrice);
+        toast("تم التحليل");
+      } catch (e) {
+        panel.innerHTML = escapeHtml(e.message || "فشل التحليل");
+        toast(e.message || "فشل التحليل", true);
+      } finally {
+        $("aiAnalyzeBtn").disabled = false;
+      }
+    };
 
     $("importBtn").onclick = async () => {
       if (!state.listing) return;
@@ -877,12 +1111,29 @@ export function renderDashboardPage(storeDomain: string): string {
             listing: state.listing,
           }),
         });
+        if ($("dAlsoFavorite").checked) {
+          await saveFavorite(state.listing, state.lastPreset);
+        }
         toast(res.data && res.data.synced ? "تم الرفع إلى Shopify" : "تم الحفظ بدون مزامنة كاملة");
         closeDrawer();
       } catch (e) {
         toast(e.message || "فشل الرفع", true);
       } finally {
         $("importBtn").disabled = false;
+      }
+    };
+
+    $("favoriteBtn").onclick = async () => {
+      if (!state.listing) return;
+      $("favoriteBtn").disabled = true;
+      try {
+        await saveFavorite(state.listing, state.lastPreset);
+        toast("تم الحفظ في المفضلة للمراجعة");
+        closeDrawer();
+      } catch (e) {
+        toast(e.message || "فشل الحفظ", true);
+      } finally {
+        $("favoriteBtn").disabled = false;
       }
     };
 
@@ -911,6 +1162,58 @@ export function renderDashboardPage(storeDomain: string): string {
       } catch (e) { toast(e.message || "فشل التحميل", true); }
     }
     $("refreshCatalog").onclick = loadCatalog;
+
+    async function loadFavorites() {
+      const root = $("favoritesList");
+      root.innerHTML = '<p class="hint">جاري التحميل…</p>';
+      try {
+        const res = await api("/api/favorites?limit=100");
+        const rows = res.data || [];
+        if (!rows.length) {
+          root.innerHTML = '<p class="hint">لا منتجات في المفضلة — احفظ من نتائج البحث للمراجعة.</p>';
+          return;
+        }
+        root.innerHTML = "";
+        rows.forEach((fav) => {
+          const listing = fav.listing || {};
+          const img = listing.image || (listing.images && listing.images[0]) || "";
+          const card = document.createElement("div");
+          card.className = "fav-card";
+          card.innerHTML =
+            '<img src="' + escapeHtml(img) + '" alt="" loading="lazy" />' +
+            '<div style="flex:1;min-width:0">' +
+            "<strong style='display:block;line-height:1.35'>" + escapeHtml(fav.title) + "</strong>" +
+            '<div class="sub">' + money(fav.original_price, fav.currency) +
+            " · ID " + escapeHtml(fav.aliexpress_id) + "</div>" +
+            '<div class="fav-actions">' +
+            '<button class="btn btn-accent fav-import" type="button">رفع Shopify</button>' +
+            '<button class="btn btn-ghost fav-open" type="button">معاينة</button>' +
+            '<button class="btn btn-ghost fav-del" type="button">حذف</button>' +
+            "</div></div>";
+          card.querySelector(".fav-open").onclick = () => openDrawer(listing);
+          card.querySelector(".fav-import").onclick = async () => {
+            try {
+              const r = await api("/api/favorites/" + fav.id + "/import", {
+                method: "POST",
+                body: JSON.stringify({ force: true }),
+              });
+              toast(r.data && r.data.synced ? "تم الرفع من المفضلة" : "تم الحفظ");
+            } catch (e) { toast(e.message || "فشل الرفع", true); }
+          };
+          card.querySelector(".fav-del").onclick = async () => {
+            try {
+              await api("/api/favorites/" + fav.id, { method: "DELETE" });
+              toast("تم الحذف");
+              loadFavorites();
+            } catch (e) { toast(e.message || "فشل الحذف", true); }
+          };
+          root.appendChild(card);
+        });
+      } catch (e) {
+        root.innerHTML = '<p class="hint" style="color:var(--danger)">' + escapeHtml(e.message || "فشل التحميل") + "</p>";
+      }
+    }
+    $("refreshFavorites").onclick = loadFavorites;
 
     function renderAddPreview(product) {
       const box = $("addPreview");
@@ -1027,6 +1330,18 @@ export function renderDashboardPage(storeDomain: string): string {
     }
     $("refreshLogs").onclick = loadLogs;
 
+    async function loadAiStatus() {
+      try {
+        const res = await api("/api/ai/status");
+        const d = res.data || {};
+        $("aiStatusHint").textContent = d.workersAi
+          ? "✅ Workers AI مفعّل — اضغط 🤖 على أي منتج للتحليل"
+          : "العناوين من ar.aliexpress.com · Workers AI: أعد نشر Worker بعد تفعيل [ai] في wrangler.toml";
+      } catch (_) { /* ignore */ }
+    }
+
+    renderPresetButtons();
+    loadAiStatus();
     boot();
   </script>
 </body>

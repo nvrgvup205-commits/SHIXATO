@@ -31,9 +31,9 @@ DEFAULT_MARKUP = "1.4"
 # Max images to push to Shopify per product
 MAX_PRODUCT_IMAGES = "8"
 
-# Optional: Workers AI for product filtering
-# [ai]
-# binding = "AI"
+# Workers AI — product analysis in dashboard (enable in Cloudflare dashboard)
+[ai]
+binding = "AI"
 
 [observability]
 enabled = true

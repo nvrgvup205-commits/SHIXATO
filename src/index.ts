@@ -2,7 +2,9 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { logger } from "hono/logger";
 import { renderDashboardPage } from "./dashboard/page";
+import ai from "./routes/ai";
 import auth from "./routes/auth";
+import favorites from "./routes/favorites";
 import products from "./routes/products";
 import sync from "./routes/sync";
 import type { Env } from "./types";
@@ -35,6 +37,9 @@ app.get("/", (c) => {
       health: "GET /health",
       login: "POST /api/auth/login",
       search: "POST /api/products/search",
+      smartSearch: "POST /api/favorites/smart-search",
+      aiAnalyze: "POST /api/ai/analyze",
+      favorites: "GET/POST /api/favorites",
       preview: "POST /api/products/preview",
       import: "POST /api/products/import",
       list: "GET /api/products",
@@ -57,6 +62,8 @@ app.get("/health", (c) =>
 );
 
 app.route("/api/auth", auth);
+app.route("/api/ai", ai);
+app.route("/api/favorites", favorites);
 app.route("/api/products", products);
 app.route("/api/sync", sync);
 

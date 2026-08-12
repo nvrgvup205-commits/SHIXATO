@@ -13,6 +13,20 @@ export interface ProductSearchFilters {
   /** Category id from PRODUCT_CATEGORIES — used when query is empty */
   category?: string;
   page?: number;
+  /** AliExpress page locale — `ar` returns Arabic titles when available */
+  locale?: "ar" | "en";
+  /** Smart-search preset grade (diagnostics only) */
+  presetGrade?: "starter" | "balanced" | "pro";
+  /**
+   * strict = hard exclude (manual search default)
+   * soft = score + rank, keep top results (presets default)
+   * off = return all parsed
+   */
+  filterMode?: "strict" | "soft" | "off";
+  /** When false, AE URL uses query+sort only — filters applied locally (more results) */
+  applyUrlFilters?: boolean;
+  /** Fetch multiple AE pages and merge (default 2 for presets) */
+  fetchPages?: number;
 
   /** URL / SSR filters sent to AliExpress */
   sort?: SearchSort;

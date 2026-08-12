@@ -24,15 +24,21 @@ describe("slugifyWholesaleQuery", () => {
 describe("AliExpressService.buildSearchUrl", () => {
   const svc = new AliExpressService();
 
-  it("builds canonical wholesale path without filters", () => {
+  it("builds canonical wholesale path without filters (Arabic default)", () => {
     expect(svc.buildSearchUrl({ query: "wireless earbuds", sort: "default" })).toBe(
-      "https://www.aliexpress.com/w/wholesale-wireless-earbuds.html",
+      "https://ar.aliexpress.com/w/wholesale-wireless-earbuds.html?lang=ar",
     );
+  });
+
+  it("uses www host for English locale", () => {
+    expect(
+      svc.buildSearchUrl({ query: "wireless earbuds", sort: "default", locale: "en" }),
+    ).toBe("https://www.aliexpress.com/w/wholesale-wireless-earbuds.html");
   });
 
   it("maps official SortType for orders", () => {
     expect(
-      svc.buildSearchUrl({ query: "phone case", sort: "orders" }),
+      svc.buildSearchUrl({ query: "phone case", sort: "orders", locale: "en" }),
     ).toBe(
       "https://www.aliexpress.com/w/wholesale-phone-case.html?SortType=total_tranpro_desc",
     );
@@ -42,6 +48,7 @@ describe("AliExpressService.buildSearchUrl", () => {
     const url = svc.buildSearchUrl({
       query: "phone case",
       sort: "price_asc",
+      locale: "en",
       minPrice: 5,
       maxPrice: 15,
       shipFromCountry: "CN",
@@ -61,7 +68,7 @@ describe("AliExpressService.buildSearchUrl", () => {
   });
 
   it("omits default sort param", () => {
-    expect(svc.buildSearchUrl({ query: "toy", sort: "default" })).toBe(
+    expect(svc.buildSearchUrl({ query: "toy", sort: "default", locale: "en" })).toBe(
       "https://www.aliexpress.com/w/wholesale-toy.html",
     );
   });
@@ -71,6 +78,7 @@ describe("AliExpressService.buildSearchUrl", () => {
     const sample = svc.buildSearchUrl({
       query: "x",
       sort: "newest",
+      locale: "en",
       minPrice: 1,
       maxPrice: 9,
       shipFromCountry: "US",
