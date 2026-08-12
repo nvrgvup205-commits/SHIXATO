@@ -125,6 +125,13 @@ export function renderDashboardPage(storeDomain: string): string {
     }
     .price { font-weight: 700; color: var(--accent); }
     .sub { font-size: .78rem; color: var(--muted); margin-top: .2rem; }
+    .product-details {
+      font-size: .74rem; color: var(--muted); margin-top: .35rem;
+      line-height: 1.45; border-top: 1px dashed var(--line); padding-top: .35rem;
+    }
+    .product-details span { display: block; }
+    .ship-free { color: var(--ok); font-weight: 600; }
+    .ship-paid { color: #8a4b12; font-weight: 600; }
     .badges { display: flex; flex-wrap: wrap; gap: .25rem; margin-top: .4rem; }
     .badge {
       font-size: .68rem; font-weight: 700; padding: .12rem .4rem; border-radius: 999px;
@@ -396,8 +403,11 @@ export function renderDashboardPage(storeDomain: string): string {
       <div class="stat"><b>التقييم</b><span id="dRating">—</span></div>
       <div class="stat"><b>عدد التقييمات</b><span id="dReviews">—</span></div>
       <div class="stat"><b>% سلبية تقديري</b><span id="dNeg">—</span></div>
+      <div class="stat"><b>الشحن</b><span id="dShip">—</span></div>
+      <div class="stat"><b>التوصيل</b><span id="dDelivery">—</span></div>
     </div>
     <div class="badges" id="dBadges"></div>
+    <div class="hint" id="dShipDetail" style="margin-top:.5rem"></div>
     <label for="dSell" style="margin-top:1rem">سعر البيع (اختياري)</label>
     <input id="dSell" type="number" min="0" step="0.01" placeholder="اتركه فارغًا للهامش التلقائي" />
     <div style="display:flex;gap:.55rem;flex-wrap:wrap;margin-top:.8rem">
@@ -536,6 +546,74 @@ export function renderDashboardPage(storeDomain: string): string {
       return "https://www.aliexpress.com/item/" + id + ".html";
     }
 
+    function formatDeliveryText(text) {
+      if (!text) return "";
+      return String(text).replace(/^Delivery:\s*/i, "توصيل: ");
+    }
+
+    function formatShippingType(item) {
+      if (item.shippingType === "free") return "مجاني";
+      if (item.shippingType === "conditional_free") {
+        return item.shippingNote || "مجاني بشروط";
+      }
+      if (item.shippingType === "paid") {
+        if (item.shippingCost != null && item.shippingCost > 0) {
+          return "مدفوع (~" + money(item.shippingCost, item.shippingCostCurrency) + ")";
+        }
+        return "مدفوع";
+      }
+      if (item.isFreeShipping) return "مجاني (تقريبي)";
+      return "—";
+    }
+
+    function buildShippingSummary(item) {
+      const parts = [];
+      if (item.shipFrom) parts.push("من " + item.shipFrom);
+      if (item.shipTo) parts.push("إلى " + item.shipTo);
+      if (item.shippingMethod) parts.push(item.shippingMethod);
+      if (item.shippingCarrier) parts.push("ناقل: " + item.shippingCarrier);
+      return parts.join(" · ");
+    }
+
+    function buildProductDetailLines(item) {
+      const lines = [];
+      const route =
+        (item.shipFrom ? ("من " + item.shipFrom) : "") +
+        (item.shipTo ? (" → إلى " + item.shipTo) : "");
+      if (route.trim()) lines.push("🚚 " + route.trim());
+
+      if (item.deliveryEstimate) {
+        lines.push("📅 " + formatDeliveryText(item.deliveryEstimate));
+      }
+
+      const shipLabel = formatShippingType(item);
+      if (shipLabel !== "—") {
+        const cls =
+          item.shippingType === "free" || item.shippingType === "conditional_free"
+            ? "ship-free"
+            : item.shippingType === "paid" ? "ship-paid" : "";
+        lines.push({ text: "💰 الشحن: " + shipLabel, cls });
+      }
+
+      if (item.shippingNote && item.shippingType !== "free") {
+        lines.push("ℹ️ " + item.shippingNote);
+      }
+
+      if (item.isLocalWarehouse) lines.push("📍 مستودع محلي / شحن سريع");
+      if (item.isChoice) lines.push("✓ Choice");
+      if (item.discountPercent != null && item.discountPercent > 0) {
+        lines.push("🏷 خصم " + item.discountPercent + "%");
+      }
+      if (item.listPrice && item.listPrice > item.originalPrice) {
+        lines.push("💵 كان " + money(item.listPrice, item.currency));
+      }
+      if (item.storeLaunchDate) {
+        lines.push("🕐 أُدرج: " + item.storeLaunchDate.split(" ")[0]);
+      }
+
+      return lines;
+    }
+
     function renderResults(items) {
       const root = $("results");
       root.innerHTML = "";
@@ -546,6 +624,14 @@ export function renderDashboardPage(storeDomain: string): string {
         const badgeHtml = (item.badges || []).slice(0, 3).map((b) =>
           '<span class="badge">' + escapeHtml(b) + "</span>"
         ).join("");
+        const detailLines = buildProductDetailLines(item);
+        const detailsHtml = detailLines.map((line) => {
+          if (typeof line === "string") {
+            return "<span>" + escapeHtml(line) + "</span>";
+          }
+          return "<span class=\"" + escapeHtml(line.cls || "") + "\">" +
+            escapeHtml(line.text) + "</span>";
+        }).join("");
         el.innerHTML =
           '<img src="' + escapeHtml(item.image || "") + '" alt="" loading="lazy" />' +
           '<div class="meta">' +
@@ -556,6 +642,7 @@ export function renderDashboardPage(storeDomain: string): string {
             (item.rating != null ? (" · ★ " + item.rating) : "") +
             (item.negativeRateEstimate != null ? (" · سلبي≈" + item.negativeRateEstimate + "%") : "") +
           "</div>" +
+          (detailsHtml ? ('<div class="product-details">' + detailsHtml + "</div>") : "") +
           '<div class="badges">' + badgeHtml + "</div>" +
           "</div>";
         el.onclick = () => openDrawer(item);
@@ -668,6 +755,11 @@ export function renderDashboardPage(storeDomain: string): string {
       $("dRating").textContent = item.rating != null ? ("★ " + item.rating) : "—";
       $("dReviews").textContent = item.reviewCount != null ? String(item.reviewCount) : "—";
       $("dNeg").textContent = item.negativeRateEstimate != null ? (item.negativeRateEstimate + "%") : "—";
+      $("dShip").textContent = formatShippingType(item);
+      $("dDelivery").textContent = item.deliveryEstimate
+        ? formatDeliveryText(item.deliveryEstimate)
+        : "—";
+      $("dShipDetail").textContent = buildShippingSummary(item);
       $("dBadges").innerHTML = (item.badges || []).map((b) =>
         '<span class="badge">' + escapeHtml(b) + "</span>"
       ).join("");
