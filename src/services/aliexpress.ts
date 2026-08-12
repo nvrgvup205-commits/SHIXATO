@@ -395,9 +395,10 @@ export class AliExpressService {
 
     const fromItemList = this.extractItemListContent(html);
     if (fromItemList?.length) {
-      return fromItemList
+      const rows = fromItemList
         .map((item) => this.listingFromSearchItem(item, titleHints))
         .filter((x): x is AliExpressListing => Boolean(x));
+      return this.enrichListingsMetricsFromHtml(html, rows);
     }
 
     const blob = this.extractBalancedJson(html, '{"appData":');
@@ -415,16 +416,197 @@ export class AliExpressService {
         const content =
           (itemList?.content as Array<Record<string, unknown>>) ?? [];
         if (content.length) {
-          return content
+          const rows = content
             .map((item) => this.listingFromSearchItem(item, titleHints))
             .filter((x): x is AliExpressListing => Boolean(x));
+          return this.enrichListingsMetricsFromHtml(html, rows);
         }
       } catch {
         // fall through
       }
     }
 
-    return this.parseSearchResultsFallback(html, titleHints);
+    return this.enrichListingsMetricsFromHtml(
+      html,
+      this.parseSearchResultsFallback(html, titleHints),
+    );
+  }
+
+  /**
+   * AliExpress search cards often omit review counts in parsed JSON — scan raw HTML per productId.
+   */
+  private enrichListingsMetricsFromHtml(
+    html: string,
+    listings: AliExpressListing[],
+  ): AliExpressListing[] {
+    if (!listings.length) return listings;
+    const metricsMap = this.extractMetricsMapFromHtml(html);
+    return listings.map((listing) =>
+      this.mergeListingMetrics(listing, metricsMap.get(listing.aliexpressId)),
+    );
+  }
+
+  private mergeListingMetrics(
+    listing: AliExpressListing,
+    metrics?: {
+      soldCount?: number;
+      reviewCount?: number;
+      rating?: number;
+      sold?: string;
+    },
+  ): AliExpressListing {
+    if (!metrics) return listing;
+    const soldCount =
+      listing.soldCount ??
+      (metrics.soldCount != null ? metrics.soldCount : undefined);
+    const reviewCount =
+      listing.reviewCount ??
+      (metrics.reviewCount != null ? metrics.reviewCount : undefined);
+    const rating =
+      listing.rating ??
+      (metrics.rating != null && Number.isFinite(metrics.rating)
+        ? metrics.rating
+        : undefined);
+    return {
+      ...listing,
+      soldCount,
+      reviewCount,
+      rating,
+      sold: listing.sold ?? metrics.sold,
+    };
+  }
+
+  private extractMetricsMapFromHtml(html: string): Map<
+    string,
+    { soldCount?: number; reviewCount?: number; rating?: number; sold?: string }
+  > {
+    const map = new Map<
+      string,
+      { soldCount?: number; reviewCount?: number; rating?: number; sold?: string }
+    >();
+
+    for (const match of html.matchAll(/"productId"\s*:\s*"(\d{6,20})"/g)) {
+      const id = match[1]!;
+      const start = match.index ?? 0;
+      const chunk = html.slice(start, start + 5000);
+      const entry = map.get(id) ?? {};
+
+      if (entry.reviewCount == null) {
+        for (const re of [
+          /"localeEvalCnt"\s*:\s*(\d+)/,
+          /"evalCnt"\s*:\s*(\d+)/,
+          /"evalCount"\s*:\s*(\d+)/,
+          /"totalValidNum"\s*:\s*(\d+)/,
+          /"reviewCount"\s*:\s*(\d+)/,
+          /"feedbackCount"\s*:\s*(\d+)/,
+        ]) {
+          const m = chunk.match(re);
+          if (m?.[1]) {
+            entry.reviewCount = Number(m[1]);
+            break;
+          }
+        }
+      }
+
+      if (entry.soldCount == null) {
+        for (const re of [
+          /"realTradeCount"\s*:\s*(\d+)/,
+          /"formatTradeCount"\s*:\s*(\d+)/,
+          /"tradeCount"\s*:\s*(\d+)/,
+        ]) {
+          const m = chunk.match(re);
+          if (m?.[1]) {
+            entry.soldCount = Number(m[1]);
+            break;
+          }
+        }
+      }
+
+      if (!entry.sold) {
+        const tradeDesc = chunk.match(/"tradeDesc"\s*:\s*"([^"\\]+)"/);
+        if (tradeDesc?.[1]) entry.sold = tradeDesc[1];
+      }
+
+      if (entry.rating == null) {
+        const star = chunk.match(/"starRating"\s*:\s*([\d.]+)/);
+        if (star?.[1] && Number.isFinite(Number(star[1]))) {
+          entry.rating = Number(star[1]);
+        }
+      }
+
+      map.set(id, entry);
+    }
+
+    return map;
+  }
+
+  /** Fetch product page when search card omitted sales/review counts. */
+  async enrichListingMetrics(listing: AliExpressListing): Promise<AliExpressListing> {
+    const hasSold = listing.soldCount != null && listing.soldCount > 0;
+    const hasReviews = listing.reviewCount != null && listing.reviewCount > 0;
+    if (hasSold && hasReviews && listing.rating != null) return listing;
+
+    try {
+      const url =
+        resolveAliExpressProductUrl(listing.url, listing.aliexpressId) ??
+        this.buildProductUrl(listing.aliexpressId);
+      const html = await this.fetchHtml(url, {
+        allowShort: false,
+        locale: "ar",
+      });
+      const fromHtml = this.extractMetricsFromProductHtml(html);
+      return this.mergeListingMetrics(listing, fromHtml);
+    } catch (err) {
+      console.warn("enrichListingMetrics failed", listing.aliexpressId, err);
+      return listing;
+    }
+  }
+
+  private extractMetricsFromProductHtml(html: string): {
+    soldCount?: number;
+    reviewCount?: number;
+    rating?: number;
+    sold?: string;
+  } {
+    const fromMap = this.extractMetricsMapFromHtml(html);
+    const idMatch = html.match(/\/item\/(\d{6,20})\.html/);
+    const fromId = idMatch?.[1] ? fromMap.get(idMatch[1]) : undefined;
+
+    const raw = this.extractEmbeddedData(html);
+    const data = (raw?.data as Record<string, unknown> | undefined) ?? raw ?? {};
+    const feedback = this.dig(data, ["feedbackModule"]) as
+      | Record<string, unknown>
+      | undefined;
+    const tradeMod = this.dig(data, ["tradeModule"]) as Record<string, unknown> | undefined;
+    const titleMod = this.dig(data, ["titleModule"]) as Record<string, unknown> | undefined;
+
+    const reviewCount = this.parseReviewCount(
+      (feedback as Record<string, unknown> | undefined) ??
+        (this.dig(titleMod, ["feedbackRating"]) as Record<string, unknown> | undefined),
+    );
+
+    const soldCount = this.parseSoldCount(
+      tradeMod?.tradeCount ??
+        tradeMod?.formatTradeCount ??
+        tradeMod?.realTradeCount ??
+        tradeMod?.tradeDesc,
+    );
+
+    const ratingNum = Number(
+      feedback?.evarageStar ??
+        feedback?.averageStar ??
+        this.dig(titleMod, ["feedbackRating", "averageStar"]) ??
+        NaN,
+    );
+
+    return {
+      soldCount: fromId?.soldCount ?? soldCount,
+      reviewCount: fromId?.reviewCount ?? reviewCount,
+      rating:
+        fromId?.rating ??
+        (Number.isFinite(ratingNum) && ratingNum > 0 ? ratingNum : undefined),
+      sold: fromId?.sold,
+    };
   }
 
   /** Pull displayTitle / Arabic titles keyed by productId from raw HTML */
@@ -577,7 +759,10 @@ export class AliExpressService {
     const evaluation = item.evaluation as Record<string, unknown> | undefined;
     const soldText = this.asString(trade?.tradeDesc) || undefined;
     const soldCount = this.parseSoldCount(
-      trade?.realTradeCount ?? trade?.tradeDesc,
+      trade?.realTradeCount ??
+        trade?.formatTradeCount ??
+        trade?.tradeCount ??
+        trade?.tradeDesc,
     );
 
     const rating =
@@ -868,6 +1053,9 @@ export class AliExpressService {
       "evalCount",
       "totalValidNum",
       "reviewCount",
+      "validNum",
+      "feedbackCount",
+      "commentCount",
     ]) {
       const n = Number(evaluation[key]);
       if (Number.isFinite(n) && n >= 0) return n;

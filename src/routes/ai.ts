@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { AliExpressService } from "../services/aliexpress";
 import { WorkersAiService } from "../services/workers-ai";
 import type { AliExpressListing, Env } from "../types";
 import { requireAuth } from "../utils/session";
@@ -19,7 +20,8 @@ ai.post("/analyze", requireAuth, async (c) => {
   }
 
   try {
-    const analysis = await new WorkersAiService(c.env).analyzeListing(listing, {
+    const enriched = await new AliExpressService().enrichListingMetrics(listing);
+    const analysis = await new WorkersAiService(c.env).analyzeListing(enriched, {
       shipToCountry: body.shipToCountry,
       targetMarginPercent: body.targetMarginPercent,
     });
@@ -27,6 +29,9 @@ ai.post("/analyze", requireAuth, async (c) => {
       ok: true,
       data: {
         ...analysis,
+        listing: enriched,
+        metricsEnriched:
+          enriched.reviewCount != null || enriched.soldCount != null,
         aiEnabled: Boolean(c.env.AI),
       },
     });
