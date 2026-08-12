@@ -205,6 +205,30 @@ export function renderDashboardPage(storeDomain: string): string {
       margin: .75rem 0 1rem; padding: 1rem; border-radius: 16px;
       border: 1px dashed rgba(15,138,106,.35); background: rgba(15,138,106,.06);
     }
+    .search-topbar {
+      display: flex; gap: .5rem; flex-wrap: wrap; align-items: center;
+      position: sticky; top: 0; z-index: 5; padding: .65rem;
+      margin: -.3rem -.2rem .75rem; border-radius: 14px;
+      background: rgba(255,255,255,.92); border: 1px solid var(--line);
+      backdrop-filter: blur(12px); box-shadow: 0 8px 24px rgba(16,35,31,.06);
+    }
+  .search-topbar #query { flex: 1 1 220px; min-width: 160px; margin: 0; }
+  .search-topbar select { width: auto; min-width: 110px; margin: 0; padding: .65rem .7rem; }
+  .search-topbar .btn { white-space: nowrap; padding: .65rem .9rem; }
+  .preset-chips { display: flex; gap: .35rem; flex-wrap: wrap; }
+  .preset-chip {
+    border: 1px solid var(--line); background: #fff; border-radius: 999px;
+    padding: .45rem .75rem; font-weight: 700; font-size: .82rem; cursor: pointer;
+  }
+  .preset-chip:hover, .preset-chip.active { border-color: var(--accent); background: #eef8f4; }
+  .preset-chip:disabled { opacity: .55; cursor: wait; }
+  #aiStatusHint { margin: 0 0 .5rem; }
+  .ai-panel {
+    margin: .75rem 0; padding: .75rem; border-radius: 12px;
+    border: 1px solid rgba(15,138,106,.25); background: #f3fbf7; font-size: .88rem;
+  }
+  .ai-panel .score { font-size: 1.4rem; font-weight: 800; color: var(--accent); }
+  .ai-panel ul { margin: .35rem 0 0; padding-inline-start: 1.1rem; }
     .smart-search h3 {
       margin: 0 0 .35rem; font-family: var(--display); font-size: 1.05rem;
     }
@@ -263,37 +287,35 @@ export function renderDashboardPage(storeDomain: string): string {
       </div>
 
       <section id="tab-search" class="panel">
-        <div class="smart-search">
-          <h3>بحث ذكي للدروب شيبنج — بدون فئة ثابتة</h3>
-          <p class="hint" style="margin:0">يختار كلمة بحث مناسبة تلقائيًا ويطبّق فلاتر جاهزة. العناوين بالعربي من علي إكسبريس.</p>
-          <div class="preset-row" id="presetButtons"></div>
-          <div id="presetTip" class="hidden"></div>
+        <div class="search-topbar">
+          <input id="query" type="search" placeholder="ابحث… أو اضغط 🥈 للبحث الذكي" />
+          <select id="shipToCountry" title="الشحن إلى">
+            <option value="SA" selected>🇸🇦 SA</option>
+            <option value="AE">🇦🇪 AE</option>
+            <option value="EG">🇪🇬 EG</option>
+            <option value="US">🇺🇸 US</option>
+          </select>
+          <select id="locale" title="لغة العناوين">
+            <option value="ar" selected>عربي</option>
+            <option value="en">EN</option>
+          </select>
+          <div class="preset-chips" id="presetButtons"></div>
+          <button class="btn btn-accent" id="searchBtn" type="button">بحث</button>
         </div>
+        <div id="presetTip" class="hidden"></div>
+        <p class="hint" id="aiStatusHint">العناوين من ar.aliexpress.com · البحث الذكي يجلب صفحات متعددة ويرتّب النتائج</p>
 
-        <div class="filters" style="margin-bottom:.75rem">
-          <div class="wide">
-            <label for="category">الفئة</label>
-            <select id="category">${categoryOptions}</select>
-          </div>
-          <div class="wide">
-            <label for="query">كلمة البحث (اختياري إذا اخترت فئة)</label>
-            <div style="display:flex;gap:.6rem;flex-wrap:wrap">
-              <input id="query" type="search" placeholder="اتركه فارغًا لاستخدام الفئة… أو اكتب كلمة مثل phone case" style="flex:1 1 240px" />
-              <button class="btn btn-accent" id="searchBtn" type="button">بحث بالفلاتر</button>
+        <details class="more" id="advancedFilters">
+          <summary>فلاتر متقدمة + فئة (اختياري)</summary>
+          <div class="filters" style="margin-top:.75rem;margin-bottom:.5rem">
+            <div class="wide">
+              <label for="category">الفئة</label>
+              <select id="category">${categoryOptions}</select>
             </div>
+            <label class="check wide"><input id="strictFilters" type="checkbox" /> فلتر صارم (قد يقلّل النتائج)</label>
           </div>
-        </div>
-        <p class="hint">لو كلمة البحث فاضية: لازم تختار <strong>فئة</strong> — ويجيب تصنيفات تحتها مع باقي الفلاتر كما هي.</p>
 
         <div class="filters" id="filters">
-          <div>
-            <label for="locale">لغة العناوين</label>
-            <select id="locale">
-              <option value="ar" selected>عربي (من علي إكسبريس)</option>
-              <option value="en">English</option>
-            </select>
-          </div>
-          <div>
             <label for="sort">الترتيب</label>
             <select id="sort">
               <option value="orders" selected>الأكثر مبيعًا</option>
@@ -320,18 +342,6 @@ export function renderDashboardPage(storeDomain: string): string {
               <option value="EUR">EUR</option>
               <option value="GBP">GBP</option>
               <option value="EGP">EGP</option>
-            </select>
-          </div>
-          <div>
-            <label for="shipToCountry">بلد الشحن إلى</label>
-            <select id="shipToCountry">
-              <option value="SA" selected>السعودية SA</option>
-              <option value="AE">الإمارات AE</option>
-              <option value="EG">مصر EG</option>
-              <option value="US">أمريكا US</option>
-              <option value="GB">بريطانيا GB</option>
-              <option value="DE">ألمانيا DE</option>
-              <option value="FR">فرنسا FR</option>
             </select>
           </div>
           <div>
@@ -394,8 +404,9 @@ export function renderDashboardPage(storeDomain: string): string {
           <label class="check"><input id="requireViralBadge" type="checkbox" /> منتجات فايرل / رائجة</label>
           <label class="check"><input id="requireFreeShippingBadge" type="checkbox" /> شارة شحن مجاني</label>
         </div>
+        </details>
 
-        <p class="hint">نصيحة: ابدأ بفئة + ترتيب فقط، ولو ما في نتائج خفّف «كلمات يجب أن تظهر» وعدد التقييمات/المبيعات — كثير من الفلاتر المحلية تستبعد كل البطاقات.</p>
+        <p class="hint">نصيحة: اترك «فلتر صارم» غير مفعّل لنتائج أكثر — البحث الذكي 🥈 هو الأسرع.</p>
         <div id="searchStatus" class="hint"></div>
         <div id="searchUrlRow" class="hidden" style="margin:.35rem 0">
           <a class="btn btn-ghost" id="openSearchAe" href="#" target="_blank" rel="noopener" style="text-decoration:none;font-size:.85rem">
@@ -500,6 +511,8 @@ export function renderDashboardPage(storeDomain: string): string {
     </div>
     <div class="badges" id="dBadges"></div>
     <div class="hint" id="dShipDetail" style="margin-top:.5rem"></div>
+    <div id="dAiPanel" class="ai-panel hidden"></div>
+    <button class="btn btn-ghost" id="aiAnalyzeBtn" type="button" style="width:100%;margin-top:.65rem">🤖 حلّل بالذكاء الاصطناعي (Cloudflare)</button>
     <label for="dSell" style="margin-top:1rem">سعر البيع (اختياري)</label>
     <input id="dSell" type="number" min="0" step="0.01" placeholder="اتركه فارغًا للهامش التلقائي" />
     <label class="check" style="margin-top:.65rem">
@@ -631,6 +644,7 @@ export function renderDashboardPage(storeDomain: string): string {
     }
 
     function collectFilters() {
+      const strict = $("strictFilters").checked;
       return {
         query: $("query").value.trim(),
         category: $("category").value || undefined,
@@ -658,6 +672,9 @@ export function renderDashboardPage(storeDomain: string): string {
         targetSellingPrice: num("targetSellingPrice"),
         minMarginPercent: num("minMarginPercent"),
         locale: $("locale").value || "ar",
+        applyUrlFilters: strict,
+        filterMode: strict ? "strict" : "soft",
+        fetchPages: strict ? 1 : 2,
       };
     }
 
@@ -699,11 +716,10 @@ export function renderDashboardPage(storeDomain: string): string {
       PRESETS.forEach((p) => {
         const btn = document.createElement("button");
         btn.type = "button";
-        btn.className = "preset-btn";
+        btn.className = "preset-chip";
         btn.dataset.grade = p.id;
-        btn.innerHTML =
-          '<span class="grade">' + escapeHtml(p.emoji + " " + p.labelAr) + "</span>" +
-          '<span class="desc">' + escapeHtml(p.descAr) + "</span>";
+        btn.textContent = p.emoji + " " + p.labelAr;
+        btn.title = p.descAr;
         btn.onclick = () => runSmartSearch(p.id);
         root.appendChild(btn);
       });
@@ -717,7 +733,7 @@ export function renderDashboardPage(storeDomain: string): string {
     }
 
     async function runSmartSearch(grade) {
-      document.querySelectorAll(".preset-btn").forEach((b) => { b.disabled = true; });
+      document.querySelectorAll(".preset-chip").forEach((b) => { b.disabled = true; });
       const preset = PRESETS.find((p) => p.id === grade);
       showPresetTip(preset ? ("💡 " + preset.tipAr) : "");
       $("searchStatus").textContent = "جاري البحث الذكي (" + (preset?.labelAr || grade) + ")…";
@@ -760,13 +776,13 @@ export function renderDashboardPage(storeDomain: string): string {
         if (!items.length) {
           toast(data.warning || "لا نتائج — جرّب درجة أخف (مبتدئ)", true);
         } else {
-          toast("تم العثور على " + items.length + " منتج — عناوين عربية");
+          toast("تم العثور على " + items.length + " منتج");
         }
       } catch (e) {
         $("searchStatus").textContent = "";
         toast(e.message || "فشل البحث الذكي", true);
       } finally {
-        document.querySelectorAll(".preset-btn").forEach((b) => { b.disabled = false; });
+        document.querySelectorAll(".preset-chip").forEach((b) => { b.disabled = false; });
       }
     }
 
@@ -1029,7 +1045,9 @@ export function renderDashboardPage(storeDomain: string): string {
       ).join("");
       $("dSell").value = "";
       $("openAe").href = aeProductUrl(item);
-      $("dHint").textContent = "الرفع يستخدم بيانات بطاقة البحث + فلاترك. ID: " + item.aliexpressId;
+      $("dHint").textContent = "الرفع يستخدم بيانات بطاقة البحث. ID: " + item.aliexpressId;
+      $("dAiPanel").classList.add("hidden");
+      $("dAiPanel").innerHTML = "";
       $("drawer").classList.add("open");
       $("backdrop").classList.add("open");
     }
@@ -1040,6 +1058,44 @@ export function renderDashboardPage(storeDomain: string): string {
     }
     $("closeDrawer").onclick = closeDrawer;
     $("backdrop").onclick = closeDrawer;
+
+    $("aiAnalyzeBtn").onclick = async () => {
+      if (!state.listing) return;
+      $("aiAnalyzeBtn").disabled = true;
+      const panel = $("dAiPanel");
+      panel.classList.remove("hidden");
+      panel.innerHTML = "جاري التحليل بالذكاء الاصطناعي…";
+      try {
+        const res = await api("/api/ai/analyze", {
+          method: "POST",
+          body: JSON.stringify({
+            listing: state.listing,
+            shipToCountry: $("shipToCountry").value,
+            targetMarginPercent: num("minMarginPercent") || 40,
+          }),
+        });
+        const a = res.data || {};
+        const pros = (a.pros || []).map((x) => "<li>✅ " + escapeHtml(x) + "</li>").join("");
+        const cons = (a.cons || []).map((x) => "<li>⚠️ " + escapeHtml(x) + "</li>").join("");
+        panel.innerHTML =
+          '<div class="score">' + escapeHtml(String(a.score || 0)) + '/100 ' +
+          (a.approved ? "✅ مناسب" : "⏸ راجع") + "</div>" +
+          "<div>" + escapeHtml(a.reason || "") + "</div>" +
+          (a.suggestedTitle ? ("<div style='margin-top:.4rem'><b>عنوان مقترح:</b> " + escapeHtml(a.suggestedTitle) + "</div>") : "") +
+          (a.suggestedSellingPrice ? ("<div><b>سعر بيع مقترح:</b> " + money(a.suggestedSellingPrice) + "</div>") : "") +
+          (a.adCopyAr ? ("<div style='margin-top:.4rem'><b>نص إعلان:</b> " + escapeHtml(a.adCopyAr) + "</div>") : "") +
+          (pros ? ("<ul>" + pros + "</ul>") : "") +
+          (cons ? ("<ul>" + cons + "</ul>") : "") +
+          '<div class="sub">' + (a.aiEnabled ? "Workers AI" : "تحليل تلقائي (فعّل Workers AI)") + "</div>";
+        if (a.suggestedSellingPrice) $("dSell").value = String(a.suggestedSellingPrice);
+        toast("تم التحليل");
+      } catch (e) {
+        panel.innerHTML = escapeHtml(e.message || "فشل التحليل");
+        toast(e.message || "فشل التحليل", true);
+      } finally {
+        $("aiAnalyzeBtn").disabled = false;
+      }
+    };
 
     $("importBtn").onclick = async () => {
       if (!state.listing) return;
@@ -1274,7 +1330,18 @@ export function renderDashboardPage(storeDomain: string): string {
     }
     $("refreshLogs").onclick = loadLogs;
 
+    async function loadAiStatus() {
+      try {
+        const res = await api("/api/ai/status");
+        const d = res.data || {};
+        $("aiStatusHint").textContent = d.workersAi
+          ? "✅ Workers AI مفعّل — اضغط 🤖 على أي منتج للتحليل"
+          : "العناوين من ar.aliexpress.com · Workers AI: أعد نشر Worker بعد تفعيل [ai] في wrangler.toml";
+      } catch (_) { /* ignore */ }
+    }
+
     renderPresetButtons();
+    loadAiStatus();
     boot();
   </script>
 </body>

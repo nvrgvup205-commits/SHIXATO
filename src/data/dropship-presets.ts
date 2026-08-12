@@ -8,129 +8,126 @@ export interface DropshipPreset {
   emoji: string;
   descAr: string;
   tipAr: string;
-  /** English wholesale terms — one is chosen at random per click */
   queries: string[];
+  /** Scoring hints — applied in soft mode, not as hard URL filters */
   filters: Omit<ProductSearchFilters, "query" | "category" | "page">;
 }
 
-/** Curated dropshipping search presets — category-agnostic, rotate queries */
+/**
+ * Presets use soft scoring + minimal AE URLs (no strict URL filters)
+ * so results are not wiped by local filters or AE anti-bot.
+ */
 export const DROPSHIP_PRESETS: DropshipPreset[] = [
   {
     id: "starter",
     emoji: "🥉",
-    labelAr: "مبتدئ — اكتشاف",
-    descAr: "منتجات مبيعاتها مثبتة بفلاتر خفيفة — مناسب للتجربة الأولى",
-    tipAr: "ابدأ هنا لو لسه بتختبر السوق. ركّز على 3–5 منتجات وجرّب إعلان بسيط.",
+    labelAr: "مبتدئ",
+    descAr: "اكتشاف واسع — أكبر عدد نتائج",
+    tipAr: "للتجربة السريعة: اختر 3 منتجات واختبر إعلانًا بسيطًا.",
     queries: [
       "kitchen gadgets",
       "phone accessories",
       "car organizer",
-      "led strip lights",
-      "storage organizer",
-      "pet hair remover",
-      "cool gadgets",
+      "led lights",
       "home decor",
-      "travel accessories",
       "smart watch",
+      "storage box",
+      "pet supplies",
+      "travel bag",
+      "beauty tools",
     ],
     filters: {
       sort: "orders",
       locale: "ar",
-      minPrice: 3,
-      maxPrice: 40,
+      filterMode: "soft",
+      applyUrlFilters: false,
+      fetchPages: 2,
       currency: "USD",
       shipToCountry: "SA",
-      minSold: 200,
-      minRating: 4.2,
-      minReviews: 20,
-      maxNegativeRate: 25,
-      choiceOnly: true,
-      excludeKeywords: "replica,fake,used,broken,wholesale lot,sample",
+      minSold: 100,
+      minRating: 4.0,
+      minReviews: 10,
+      maxNegativeRate: 30,
+      excludeKeywords: "replica,fake,counterfeit",
     },
   },
   {
     id: "balanced",
     emoji: "🥈",
-    labelAr: "متوسط — منتجات قوية",
-    descAr: "توازن بين المبيعات والتقييم والهامش — الأنسب لمعظم المتاجر",
-    tipAr: "الأكثر استخدامًا. اختر منتج بسيط (بدون مقاسات) وهامش 40%+ بعد الشحن.",
+    labelAr: "متوسط",
+    descAr: "توازن مبيعات + تقييم — الأنسب يوميًا",
+    tipAr: "الأكثر استخدامًا. ركّز على منتج بسيط وهامش 35%+.",
     queries: [
       "wireless earbuds",
-      "portable blender",
-      "phone holder car",
+      "phone holder",
+      "power bank",
       "massage gun",
-      "power bank charger",
-      "hijab magnet pin",
-      "security camera mini",
+      "portable blender",
+      "hijab pin",
       "cleaning tools",
       "gaming accessories",
       "smart home",
+      "car accessories",
     ],
     filters: {
       sort: "orders",
       locale: "ar",
-      minPrice: 5,
-      maxPrice: 35,
+      filterMode: "soft",
+      applyUrlFilters: false,
+      fetchPages: 2,
       currency: "USD",
       shipToCountry: "SA",
-      minSold: 500,
-      minRating: 4.5,
-      minReviews: 80,
-      maxNegativeRate: 18,
-      minDiscountPercent: 20,
+      minSold: 300,
+      minRating: 4.3,
+      minReviews: 30,
+      maxNegativeRate: 22,
+      minDiscountPercent: 10,
       targetSellingPrice: 79,
-      minMarginPercent: 38,
-      choiceOnly: true,
-      freeShipping: true,
-      highRatedSellers: true,
-      excludeKeywords: "replica,fake,used,broken,wholesale lot,sample,defective",
+      minMarginPercent: 30,
+      excludeKeywords: "replica,fake,counterfeit,used",
     },
   },
   {
     id: "pro",
     emoji: "🥇",
-    labelAr: "محترف — الأفضل",
-    descAr: "فلاتر صارمة: مبيعات عالية + تقييم ممتاز + شحن مجاني + ترند",
-    tipAr: "نتائج أقل لكن جودة أعلى. مثالي قبل إنفاق ميزانية إعلانات.",
+    labelAr: "محترف",
+    descAr: "أعلى جودة — مبيعات وتقييم قوي",
+    tipAr: "نتائج أقل لكن أدق. مثالي قبل إنفاق ميزانية إعلانات.",
     queries: [
-      "viral trending products",
-      "bestseller gadgets",
-      "car vacuum cleaner",
+      "trending gadgets",
+      "car vacuum",
       "mini projector",
-      "portable fan usb",
-      "water bottle smart",
-      "pet supplies",
-      "outdoor camping gear",
-      "beauty tools",
+      "portable fan",
+      "water bottle",
+      "security camera",
+      "outdoor camping",
       "tablet accessories",
+      "kitchen organizer",
+      "fitness equipment",
     ],
     filters: {
       sort: "orders",
       locale: "ar",
-      minPrice: 6,
-      maxPrice: 30,
+      filterMode: "soft",
+      applyUrlFilters: false,
+      fetchPages: 3,
       currency: "USD",
       shipToCountry: "SA",
-      minSold: 1000,
-      minRating: 4.6,
-      minReviews: 150,
-      maxNegativeRate: 12,
-      minDiscountPercent: 25,
+      minSold: 500,
+      minRating: 4.5,
+      minReviews: 50,
+      maxNegativeRate: 18,
+      minDiscountPercent: 15,
       targetSellingPrice: 99,
-      minMarginPercent: 42,
-      choiceOnly: true,
-      freeShipping: true,
-      highRatedSellers: true,
-      requireFreeShippingBadge: true,
-      excludeKeywords:
-        "replica,fake,used,broken,wholesale lot,sample,defective,counterfeit",
+      minMarginPercent: 35,
+      excludeKeywords: "replica,fake,counterfeit,used,broken",
     },
   },
 ];
 
 export function pickPresetQuery(preset: DropshipPreset): string {
   const idx = Math.floor(Math.random() * preset.queries.length);
-  return preset.queries[idx] ?? preset.queries[0] ?? "cool gadgets";
+  return preset.queries[idx] ?? preset.queries[0] ?? "gadgets";
 }
 
 export function findPreset(id: string): DropshipPreset | undefined {
@@ -150,5 +147,13 @@ export function buildPresetSearch(
     query: overrides?.query ?? pickPresetQuery(preset),
     page: 1,
     presetGrade: grade,
+    filterMode: "soft",
+    applyUrlFilters: false,
   };
+}
+
+export function presetMinScore(grade: DropshipGrade): number {
+  if (grade === "pro") return 58;
+  if (grade === "balanced") return 48;
+  return 38;
 }

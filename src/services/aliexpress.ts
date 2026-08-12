@@ -45,7 +45,10 @@ export class AliExpressService {
     return canonicalAliExpressProductUrl(aliexpressId);
   }
 
-  buildSearchUrl(filters: ProductSearchFilters): string {
+  buildSearchUrl(filters: ProductSearchFilters, options?: { minimal?: boolean }): string {
+    const locale = filters.locale === "en" ? "en" : "ar";
+    const host =
+      locale === "ar" ? "https://ar.aliexpress.com" : "https://www.aliexpress.com";
     const safe = slugifyWholesaleQuery(filters.query ?? "");
     const params = new URLSearchParams();
     const page = filters.page && filters.page > 1 ? filters.page : 1;
@@ -54,25 +57,30 @@ export class AliExpressService {
     const sort = SEARCH_SORT_MAP[filters.sort ?? "orders"];
     if (sort) params.set("SortType", sort);
 
-    if (filters.minPrice != null && filters.minPrice >= 0) {
-      params.set("minPrice", String(filters.minPrice));
+    const minimal = options?.minimal ?? filters.applyUrlFilters === false;
+    if (!minimal) {
+      if (filters.minPrice != null && filters.minPrice >= 0) {
+        params.set("minPrice", String(filters.minPrice));
+      }
+      if (filters.maxPrice != null && filters.maxPrice > 0) {
+        params.set("maxPrice", String(filters.maxPrice));
+      }
+      if (filters.shipFromCountry) {
+        params.set("shipFromCountry", filters.shipFromCountry.toUpperCase());
+      }
+      if (filters.shipToCountry) {
+        params.set("shipCountry", filters.shipToCountry.toUpperCase());
+      }
+      if (filters.freeShipping) params.set("isFreeShip", "y");
+      if (filters.choiceOnly) params.set("g", "y");
+      if (filters.highRatedSellers) params.set("isFavorite", "y");
+      if (filters.unitPrice) params.set("isUnitPrice", "y");
     }
-    if (filters.maxPrice != null && filters.maxPrice > 0) {
-      params.set("maxPrice", String(filters.maxPrice));
-    }
-    if (filters.shipFromCountry) {
-      params.set("shipFromCountry", filters.shipFromCountry.toUpperCase());
-    }
-    if (filters.shipToCountry) {
-      params.set("shipCountry", filters.shipToCountry.toUpperCase());
-    }
-    if (filters.freeShipping) params.set("isFreeShip", "y");
-    if (filters.choiceOnly) params.set("g", "y");
-    if (filters.highRatedSellers) params.set("isFavorite", "y");
-    if (filters.unitPrice) params.set("isUnitPrice", "y");
+
+    if (locale === "ar") params.set("lang", "ar");
 
     const qs = params.toString();
-    return `https://www.aliexpress.com/w/wholesale-${safe}.html${qs ? `?${qs}` : ""}`;
+    return `${host}/w/wholesale-${safe}.html${qs ? `?${qs}` : ""}`;
   }
 
   /** Exposed for unit tests / diagnostics */
@@ -101,63 +109,84 @@ export class AliExpressService {
       sort: filters.sort ?? "orders",
       currency: (filters.currency || "USD").toUpperCase(),
       shipToCountry: (filters.shipToCountry || "SA").toUpperCase(),
+      locale: filters.locale === "en" ? "en" : "ar",
+      filterMode:
+        filters.filterMode ??
+        (filters.presetGrade ? "soft" : "strict"),
+      applyUrlFilters:
+        filters.applyUrlFilters ??
+        (filters.presetGrade ? false : true),
     };
 
     const locale = normalized.locale === "en" ? "en" : "ar";
-
     const cookie = this.buildLocaleCookie(
       normalized.currency!,
       normalized.shipToCountry!,
       locale,
     );
 
+    const fetchPages = Math.min(
+      Math.max(normalized.fetchPages ?? (normalized.presetGrade ? 2 : 1), 1),
+      3,
+    );
+
     const searchUrl = this.buildSearchUrl(normalized);
-    let usedFallbackUrl = false;
-    let html: string;
-    try {
-      html = await this.fetchHtml(searchUrl, {
-        allowShort: false,
-        cookie,
-        locale,
-      });
-      if (this.isBlockedPage(html)) throw new Error("blocked");
-    } catch {
-      // Retry with a simpler URL (query + sort only) when AE anti-bot rejects
-      // the full filtered URL — local post-filters still apply after parse.
-      usedFallbackUrl = true;
-      const minimal: ProductSearchFilters = {
-        query: normalized.query,
-        page: normalized.page,
-        sort: normalized.sort,
-      };
-      const fallbackUrl = this.buildSearchUrl(minimal);
-      html = await this.fetchHtml(fallbackUrl, {
-        allowShort: false,
-        cookie,
-        locale,
-      });
-      if (this.isBlockedPage(html)) {
-        throw new HttpError(
-          502,
-          "علي إكسبريس حظر الصفحة مؤقتًا. جرّب بعد دقيقة أو خفّف فلاتر السعر/الشحن",
-        );
+    let usedFallbackUrl = normalized.applyUrlFilters === false;
+    const parsedById = new Map<string, AliExpressListing>();
+
+    for (let page = 1; page <= fetchPages; page += 1) {
+      const pageFilters = { ...normalized, page };
+      let html: string | null = null;
+
+      if (!normalized.applyUrlFilters) {
+        const minimalUrl = this.buildSearchUrl(pageFilters, { minimal: true });
+        html = await this.fetchSearchHtml(minimalUrl, cookie, locale);
+      } else {
+        try {
+          const fullUrl = this.buildSearchUrl(pageFilters);
+          html = await this.fetchSearchHtml(fullUrl, cookie, locale);
+          if (this.isBlockedPage(html)) throw new Error("blocked");
+        } catch {
+          usedFallbackUrl = true;
+          const minimalUrl = this.buildSearchUrl(pageFilters, { minimal: true });
+          html = await this.fetchSearchHtml(minimalUrl, cookie, locale);
+        }
       }
+
+      if (!html || this.isBlockedPage(html)) {
+        if (page === 1) {
+          throw new HttpError(
+            502,
+            "علي إكسبريس حظر الصفحة مؤقتًا. جرّب بعد دقيقة أو استخدم البحث الذكي",
+          );
+        }
+        break;
+      }
+
+      const pageItems = this.parseSearchResults(html);
+      for (const item of pageItems) {
+        if (!parsedById.has(item.aliexpressId)) {
+          parsedById.set(item.aliexpressId, item);
+        }
+      }
+
+      if (pageItems.length < 8) break;
     }
 
-    const parsed = this.parseSearchResults(html);
+    const parsed = [...parsedById.values()];
     const results = this.applyClientFilters(parsed, normalized);
 
     let warning: string | undefined;
     if (parsed.length === 0) {
-      warning = "علي إكسبريس لم يُرجع منتجات — جرّب فئة أخرى أو أعد المحاولة";
+      warning = "علي إكسبريس لم يُرجع منتجات — جرّب كلمة أخرى أو أعد المحاولة";
     } else if (results.length === 0) {
       warning =
-        `وجدنا ${parsed.length} منتجًا لكن الفلاتر المحلية استبعدتهم كلهم ` +
-        `(كلمات include/exclude، مبيعات، تقييمات، هامش ربح…). ` +
-        `اضغط «عرض النتائج بدون فلتر محلي» أو خفّف الفلاتر.`;
+        `وجدنا ${parsed.length} منتجًا لكن الفلاتر استبعدتهم — جرّب «عرض بدون فلتر» أو البحث الذكي`;
     } else if (usedFallbackUrl) {
       warning =
-        "تم البحث برابط مبسّط لأن علي إكسبريس رفض الفلاتر المتقدمة — طُبّقت الفلاتر محليًا";
+        "تم جلب نتائج برابط مبسّط (أكثر استقرارًا) — الفلاتر طُبّقت محليًا بالترتيب الذكي";
+    } else if (normalized.filterMode === "soft") {
+      warning = `تم ترتيب ${results.length} منتجًا حسب جودة الدروب شيبنج (وضع ذكي)`;
     }
 
     return {
@@ -165,16 +194,13 @@ export class AliExpressService {
       page: normalized.page!,
       searchUrl,
       searchUrlUsed: usedFallbackUrl
-        ? this.buildSearchUrl({
-            query: normalized.query,
-            page: normalized.page,
-            sort: normalized.sort,
-          })
+        ? this.buildSearchUrl(normalized, { minimal: true })
         : searchUrl,
       filtersApplied: {
         ...normalized,
         categoryLabelAr: resolved.categoryLabelAr,
         freeTextQuery: (filters.query ?? "").trim() || null,
+        fetchPages,
       },
       results,
       resultsBeforeFilter: parsed,
@@ -183,6 +209,19 @@ export class AliExpressService {
       warning,
       usedFallbackUrl,
     };
+  }
+
+  private async fetchSearchHtml(
+    url: string,
+    cookie: string,
+    locale: "ar" | "en",
+  ): Promise<string> {
+    const html = await this.fetchHtml(url, {
+      allowShort: false,
+      cookie,
+      locale,
+    });
+    return html;
   }
 
   fromListing(listing: AliExpressListing): AliExpressProduct {
@@ -278,7 +317,13 @@ export class AliExpressService {
     locale: "ar" | "en" = "ar",
   ): string {
     const bLocale = locale === "ar" ? "ar_SA" : "en_US";
-    return `aep_usuc_f=site=glo&c_tp=${encodeURIComponent(currency)}&region=${encodeURIComponent(shipToCountry)}&b_locale=${bLocale}`;
+    const lang = locale === "ar" ? "ar" : "en";
+    return [
+      `aep_usuc_f=site=glo&c_tp=${encodeURIComponent(currency)}&region=${encodeURIComponent(shipToCountry)}&b_locale=${bLocale}`,
+      `intl_locale=${bLocale}`,
+      `xman_us_f=x_locale=${bLocale}&x_l=1&x_c_chg=1`,
+      `aep_history=${lang}`,
+    ].join("; ");
   }
 
   private async fetchHtml(
@@ -286,6 +331,10 @@ export class AliExpressService {
     options?: { allowShort?: boolean; cookie?: string; locale?: "ar" | "en" },
   ): Promise<string> {
     const locale = options?.locale === "en" ? "en" : "ar";
+    const referer =
+      locale === "ar"
+        ? "https://ar.aliexpress.com/"
+        : "https://www.aliexpress.com/";
     const headers: Record<string, string> = {
       "User-Agent":
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
@@ -293,8 +342,9 @@ export class AliExpressService {
         "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
       "Accept-Language":
         locale === "ar"
-          ? "ar-SA,ar;q=0.9,en;q=0.8"
+          ? "ar-SA,ar;q=0.95,en;q=0.5"
           : "en-US,en;q=0.9,ar;q=0.8",
+      Referer: referer,
       "Cache-Control": "no-cache",
       "Upgrade-Insecure-Requests": "1",
     };
@@ -335,12 +385,12 @@ export class AliExpressService {
   }
 
   private parseSearchResults(html: string): AliExpressListing[] {
-    // Current AE PC search embeds cards in `_dida_config_._init_data_` as
-    // `"itemList":{"content":[...]}` (not the older appData/loaderData shape).
+    const titleHints = this.extractTitleHintsFromHtml(html);
+
     const fromItemList = this.extractItemListContent(html);
     if (fromItemList?.length) {
       return fromItemList
-        .map((item) => this.listingFromSearchItem(item))
+        .map((item) => this.listingFromSearchItem(item, titleHints))
         .filter((x): x is AliExpressListing => Boolean(x));
     }
 
@@ -360,7 +410,7 @@ export class AliExpressService {
           (itemList?.content as Array<Record<string, unknown>>) ?? [];
         if (content.length) {
           return content
-            .map((item) => this.listingFromSearchItem(item))
+            .map((item) => this.listingFromSearchItem(item, titleHints))
             .filter((x): x is AliExpressListing => Boolean(x));
         }
       } catch {
@@ -368,7 +418,38 @@ export class AliExpressService {
       }
     }
 
-    return this.parseSearchResultsFallback(html);
+    return this.parseSearchResultsFallback(html, titleHints);
+  }
+
+  /** Pull displayTitle / Arabic titles keyed by productId from raw HTML */
+  private extractTitleHintsFromHtml(html: string): Map<string, string> {
+    const out = new Map<string, string>();
+    const patterns = [
+      /"productId"\s*:\s*"(\d{6,20})"[\s\S]{0,1200}?"displayTitle"\s*:\s*"((?:\\.|[^"\\])+)"/g,
+      /"productId"\s*:\s*"(\d{6,20})"[\s\S]{0,1200}?"seoTitle"\s*:\s*"((?:\\.|[^"\\])+)"/g,
+    ];
+
+    for (const re of patterns) {
+      for (const match of html.matchAll(re)) {
+        const id = match[1]!;
+        let title = match[2]!;
+        try {
+          title = JSON.parse(`"${title.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`);
+        } catch {
+          title = title.replace(/\\u([\dA-Fa-f]{4})/g, (_, hex) =>
+            String.fromCharCode(parseInt(hex, 16)),
+          );
+        }
+        if (title && (!out.has(id) || this.hasArabic(title))) {
+          out.set(id, title);
+        }
+      }
+    }
+    return out;
+  }
+
+  private hasArabic(text: string): boolean {
+    return /[\u0600-\u06FF]/.test(text);
   }
 
   /** Pull `itemList.content` array from modern AliExpress search HTML/JS. */
@@ -431,14 +512,27 @@ export class AliExpressService {
 
   private listingFromSearchItem(
     item: Record<string, unknown>,
+    titleHints?: Map<string, string>,
   ): AliExpressListing | null {
     const aliexpressId = String(item.productId ?? item.redirectedId ?? "");
     if (!/^\d{6,20}$/.test(aliexpressId)) return null;
 
     const titleObj = item.title as Record<string, unknown> | undefined;
-    const title =
+    const multiLang = item.multiLanguageTitleDTOList as
+      | Array<Record<string, unknown>>
+      | undefined;
+    const arFromMulti = multiLang?.find((t) =>
+      /ar/i.test(String(t.language ?? t.locale ?? "")),
+    );
+    const hint = titleHints?.get(aliexpressId);
+
+    let title =
+      this.asString(arFromMulti?.title) ||
+      this.asString(arFromMulti?.displayTitle) ||
+      (hint && this.hasArabic(hint) ? hint : "") ||
       this.asString(titleObj?.displayTitle) ||
       this.asString(titleObj?.seoTitle) ||
+      hint ||
       this.asString(titleObj?.title) ||
       this.asString(item.subject) ||
       `Product ${aliexpressId}`;
@@ -778,7 +872,45 @@ export class AliExpressService {
     items: AliExpressListing[],
     filters: ProductSearchFilters,
   ): AliExpressListing[] {
+    const mode =
+      filters.filterMode ?? (filters.presetGrade ? "soft" : "strict");
+
+    if (mode === "off") return items;
+
     const exclude = this.splitKeywords(filters.excludeKeywords);
+
+    if (mode === "soft") {
+      const scored = items
+        .filter((item) => {
+          const title = item.title.toLowerCase();
+          return !exclude.some((k) => title.includes(k));
+        })
+        .map((item) => ({
+          item,
+          score: this.scoreListing(item, filters),
+        }))
+        .sort((a, b) => b.score - a.score);
+
+      const minScore =
+        filters.presetGrade === "pro"
+          ? 58
+          : filters.presetGrade === "balanced"
+            ? 48
+            : filters.presetGrade === "starter"
+              ? 38
+              : 45;
+
+      let results = scored
+        .filter((s) => s.score >= minScore)
+        .map((s) => s.item);
+
+      if (results.length < 12) {
+        results = scored.slice(0, Math.min(48, scored.length)).map((s) => s.item);
+      }
+
+      return results;
+    }
+
     const include = this.splitKeywords(filters.includeKeywords);
 
     return items.filter((item) => {
@@ -837,6 +969,70 @@ export class AliExpressService {
     });
   }
 
+  private scoreListing(
+    item: AliExpressListing,
+    filters: ProductSearchFilters,
+  ): number {
+    let score = 40;
+
+    if (filters.minSold != null) {
+      const sold = item.soldCount ?? 0;
+      if (sold >= filters.minSold) score += 28;
+      else if (sold >= filters.minSold * 0.5) score += 12;
+      else score -= 8;
+    } else if ((item.soldCount ?? 0) > 0) {
+      score += 10;
+    }
+
+    if (filters.minRating != null) {
+      const rating = item.rating ?? 0;
+      if (rating >= filters.minRating) score += 18;
+      else if (rating >= filters.minRating - 0.3) score += 6;
+      else score -= 10;
+    } else if ((item.rating ?? 0) >= 4.3) {
+      score += 8;
+    }
+
+    if (filters.minReviews != null) {
+      const reviews = item.reviewCount ?? 0;
+      if (reviews >= filters.minReviews) score += 12;
+      else if (reviews >= filters.minReviews * 0.4) score += 4;
+    }
+
+    if (filters.maxNegativeRate != null) {
+      const neg = item.negativeRateEstimate ?? 50;
+      if (neg <= filters.maxNegativeRate) score += 8;
+      else score -= 6;
+    }
+
+    if (filters.minDiscountPercent != null && (item.discountPercent ?? 0) >= filters.minDiscountPercent) {
+      score += 6;
+    }
+
+    if (item.isChoice) score += 5;
+    if (item.isFreeShipping) score += 5;
+    if (item.isViral) score += 4;
+    if (this.hasArabic(item.title)) score += 3;
+
+    if (
+      filters.targetSellingPrice != null &&
+      filters.minMarginPercent != null &&
+      item.originalPrice > 0
+    ) {
+      const margin =
+        ((filters.targetSellingPrice - item.originalPrice) /
+          filters.targetSellingPrice) *
+        100;
+      if (margin >= filters.minMarginPercent) score += 14;
+      else if (margin >= filters.minMarginPercent - 10) score += 4;
+      else score -= 6;
+    }
+
+    if (item.originalPrice > 0 && item.originalPrice <= 35) score += 4;
+
+    return Math.max(0, Math.min(100, score));
+  }
+
   private splitKeywords(value?: string): string[] {
     if (!value?.trim()) return [];
     return value
@@ -845,11 +1041,16 @@ export class AliExpressService {
       .filter(Boolean);
   }
 
-  private parseSearchResultsFallback(html: string): AliExpressListing[] {
-    const ids = [...new Set([...html.matchAll(/\/item\/(\d{6,20})\.html/g)].map((m) => m[1]!))];
-    return ids.slice(0, 40).map((aliexpressId) => ({
+  private parseSearchResultsFallback(
+    html: string,
+    titleHints?: Map<string, string>,
+  ): AliExpressListing[] {
+    const ids = [
+      ...new Set([...html.matchAll(/\/item\/(\d{6,20})\.html/g)].map((m) => m[1]!)),
+    ];
+    return ids.slice(0, 48).map((aliexpressId) => ({
       aliexpressId,
-      title: `AliExpress ${aliexpressId}`,
+      title: titleHints?.get(aliexpressId) || `AliExpress ${aliexpressId}`,
       url: this.buildProductUrl(aliexpressId),
       image: "",
       images: [],

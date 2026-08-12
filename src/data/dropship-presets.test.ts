@@ -19,7 +19,7 @@ describe("dropship-presets", () => {
     const filters = buildPresetSearch("balanced", { shipToCountry: "SA" });
     expect(filters.locale).toBe("ar");
     expect(filters.query && filters.query.length >= 2).toBe(true);
-    expect(filters.minSold).toBe(500);
+    expect(filters.minSold).toBe(300);
     expect(filters.presetGrade).toBe("balanced");
   });
 
