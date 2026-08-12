@@ -69,7 +69,7 @@ export class KeywordGeneratorService {
     limit: number,
   ): Promise<string[]> {
     const year = new Date().getUTCFullYear();
-    const prompt = `You generate AliExpress wholesale search keywords for dropshipping in Saudi Arabia.
+    const prompt = `You generate AliExpress SEARCH keywords for a wow-factor dropshipping store in Saudi Arabia.
 
 Category id: ${categoryId}
 Category (Arabic): ${labelAr}
@@ -78,18 +78,19 @@ Year: ${year}
 
 Return ONLY JSON: {"keywords":["english keyword 1","keyword 2",...]}
 
-Rules:
-- Exactly ${limit} keywords, each 2-5 words, English only
-- Each keyword = specific product that SOLVES a daily problem (organizer, holder, fix, relief, smart, portable…)
-- Trendy / viral-friendly for ${year} — problem-solving gadgets and tools
-- NO generic junk: no wholesale, bulk, random style, sticker, assorted, replica, coloring book
-- NO duplicate meanings — diversify sub-niches within the category
-- Good for AliExpress search: concrete product names buyers search for
-- Examples style: "trunk organizer", "magnetic phone car mount", "under sink storage rack"
+Strategy — PROBLEM-FIRST keywords (not boring generic):
+- Exactly ${limit} keywords, English, 2-6 words each
+- Each keyword = a PAIN POINT or SCROLL-STOPPER product people instantly understand
+- Think: "what makes a human stop scrolling and say this solves my problem?"
+- Mix: organizers, holders, fixers, smart tools, space savers, life hacks, clever gadgets
+- Diversify sub-problems within the category — no near-duplicates
+- Viral/TikTok-friendly ${year} angles where natural
 
-Category examples:
-- car accessories → car seat gap organizer, trunk storage box, visor phone holder…
-- beauty makeup → makeup brush organizer, travel cosmetic bag, LED mirror portable…`;
+BANNED in keywords: wholesale, bulk, random style, sticker, assorted, replica, coloring book, lot of
+
+Examples (car): car seat gap filler, trunk organizer expandable, magnetic hidden phone mount, cable clutter organizer seat
+Examples (home): under sink organizer pull out, messy drawer divider, spice rack rotating, door hook no drill
+Examples (beauty): travel makeup organizer LED, vanity brush holder dust proof, mirror folding portable`;
 
     const result = await this.env.AI!.run(MODEL, {
       messages: [

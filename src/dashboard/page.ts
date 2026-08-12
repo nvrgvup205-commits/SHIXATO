@@ -329,7 +329,7 @@ export function renderDashboardPage(storeDomain: string): string {
           <div style="display:flex;flex-wrap:wrap;gap:.6rem;align-items:center;justify-content:space-between">
             <div>
               <strong style="font-size:1.05rem">⚡ اكتشاف تلقائي مبهر</strong>
-              <p>Workers AI يولّد 15 كلمة لأي فئة، يبحث في 2 صفحة لكل كلمة، ويعرض الأقوى (score 68+)</p>
+              <p>كلمات قوية بالAI + إبهار المتجر (مش أرقام) — منتجات تثبت الإنسان وتحل مشكلة</p>
             </div>
             <button class="btn btn-auto-discover" id="autoDiscoverBtn" type="button">ابدأ الاكتشاف (1–2 دقيقة)</button>
           </div>
@@ -351,7 +351,7 @@ export function renderDashboardPage(storeDomain: string): string {
           <button class="btn btn-accent" id="searchBtn" type="button">بحث</button>
         </div>
         <div id="presetTip" class="hidden"></div>
-        <p class="hint" id="aiStatusHint">⚡ اكتشاف تلقائي: AI كلمات + فلترة ذكية — إن ما طلع مقبول اضغط «عرض المُتجاهَل»</p>
+        <p class="hint" id="aiStatusHint">⚡ إبهار المتجر: هل المنتج يثبت الإنسان ويحل مشكلة؟ — مش أرقام مبيعات</p>
 
         <details class="more" id="advancedFilters">
           <summary>فلاتر متقدمة</summary>
@@ -1080,6 +1080,8 @@ export function renderDashboardPage(storeDomain: string): string {
     }
 
     function itemDiscoveryScore(item) {
+      const wow = Number(item.wowScore);
+      if (Number.isFinite(wow) && wow > 0) return wow * 10;
       const final = Number(item.discoverFinalScore);
       if (Number.isFinite(final) && final > 0) return final;
       return Number(item.discoveryScore) || 0;
@@ -1127,7 +1129,7 @@ export function renderDashboardPage(storeDomain: string): string {
             shipToCountry: $("shipToCountry").value,
             currency: $("currency").value,
             keywordLimit: 15,
-            minScore: 68,
+            minWow: 7,
             maxResults: 12,
           }),
         });
@@ -1139,12 +1141,13 @@ export function renderDashboardPage(storeDomain: string): string {
         state.discoverApproved = items;
         state.discoverRejected = data.rejectedResults || [];
 
-        const stats = data.scoreStats || {};
+        const stats = data.wowStats || data.scoreStats || {};
+        const minUsed = data.minWowUsed ?? data.minScoreUsed ?? 7;
         $("searchStatus").textContent =
-          "اكتشاف: " + items.length + " مقبول (≥ " + (data.minScoreUsed || 68) +
-          ") · مُتجاهَل " + (state.discoverRejected.length || 0) +
-          " · أعلى score " + (stats.maxScore || "—") +
-          " · متوسط " + (stats.medianScore || "—") +
+          "إبهار: " + items.length + " منتج يثبت (≥ " + minUsed + "/10) · مُتجاهَل " +
+          (state.discoverRejected.length || 0) +
+          " · أعلى إبهار " + (stats.maxWow ?? stats.maxScore ?? "—") + "/10" +
+          " · متوسط " + (stats.medianWow ?? stats.medianScore ?? "—") +
           " · " + (data.keywordSource === "workers-ai" ? "كلمات AI" : "كلمات احتياطية") +
           " · " + (data.keywordsScanned || 0) + " كلمات · " +
           (data.totalUnique || 0) + " فريد · " +
@@ -1255,9 +1258,17 @@ export function renderDashboardPage(storeDomain: string): string {
         if (item.discoverRejectReason) {
           flags.push('<span class="badge" style="background:#fee4e2;color:#b42318">⛔ ' + escapeHtml(item.discoverRejectReason) + "</span>");
         }
-        if (item.discoverFinalScore != null) {
+        if (item.wowScore != null) {
+          flags.push('<span class="badge" style="background:#10231f;color:#e8ff57">✨ ' + escapeHtml(String(item.wowScore)) + "/10</span>");
+        } else if (item.discoverFinalScore != null) {
           flags.push('<span class="badge" style="background:#10231f;color:#e8ff57">⭐ ' + escapeHtml(String(item.discoverFinalScore)) + "</span>");
-        } else if (item.discoveryScore != null) {
+        }
+        if (item.wowProblemAr) {
+          flags.push('<span class="badge" style="background:#eef8f4;color:#0f8a6a">💡 ' + escapeHtml(item.wowProblemAr.slice(0, 48)) + "</span>");
+        }
+        if (item.wowStopReasonAr) {
+          flags.push('<span class="badge" style="background:#e8ff57;color:#10231f">👀 ' + escapeHtml(item.wowStopReasonAr.slice(0, 56)) + "</span>");
+        } else if (item.discoveryScore != null && !item.wowScore) {
           flags.push('<span class="badge" style="background:#e8ff57;color:#10231f">🔥 ' + escapeHtml(String(item.discoveryScore)) + "</span>");
         }
         if (item.matchedKeyword) {

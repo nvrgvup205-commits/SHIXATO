@@ -26,6 +26,7 @@ discover.post("/auto", requireAuth, async (c) => {
     shipToCountry?: string;
     currency?: string;
     keywordLimit?: number;
+    minWow?: number;
     minScore?: number;
     maxResults?: number;
   };
@@ -40,7 +41,7 @@ discover.post("/auto", requireAuth, async (c) => {
       shipToCountry: body.shipToCountry,
       currency: body.currency,
       keywordLimit: body.keywordLimit,
-      minScore: body.minScore,
+      minWow: body.minWow ?? body.minScore,
       maxResults: body.maxResults,
       env: c.env,
     });

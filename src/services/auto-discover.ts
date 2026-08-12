@@ -7,18 +7,23 @@ import {
   delayBetweenKeywordSearches,
 } from "../utils/rate-limiter";
 import { AliExpressService } from "./aliexpress";
-import {
-  computeDiscoverScore,
-  explainRejectReason,
-  passesDiscoverPick,
-  type DiscoverScoreBreakdown,
-} from "./discover-scoring";
 import { KeywordGeneratorService, type KeywordSource } from "./keyword-generator";
+import { WowAnalyzerService } from "./wow-analyzer";
+import {
+  computeWowHeuristic,
+  explainWowReject,
+  passesWowGate,
+  wowToDisplayScore,
+} from "./wow-scoring";
 
 export interface ScoredDiscoverListing extends AliExpressListing {
-  discoverFinalScore: number;
-  discoverBreakdown: DiscoverScoreBreakdown;
+  /** إبهار 1–10 — الهدف الأساسي */
+  wowScore: number;
+  wowStopReasonAr?: string;
+  wowProblemAr?: string;
+  wowFlags?: string[];
   matchedKeyword: string;
+  discoverFinalScore: number;
   discoverRejected?: boolean;
   discoverRejectReason?: string;
 }
@@ -28,18 +33,18 @@ export interface AutoDiscoverOptions {
   shipToCountry?: string;
   currency?: string;
   keywordLimit?: number;
-  minScore?: number;
+  /** Minimum wow 1–10 (default 7) */
+  minWow?: number;
   maxResults?: number;
-  fallbackMinScore?: number;
+  fallbackMinWow?: number;
   env?: Env;
 }
 
-export interface DiscoverScoreStats {
-  maxScore: number;
-  medianScore: number;
-  countAtLeast80: number;
-  countAtLeast70: number;
-  countAtLeast60: number;
+export interface WowScoreStats {
+  maxWow: number;
+  medianWow: number;
+  countAtLeast8: number;
+  countAtLeast7: number;
 }
 
 export interface AutoDiscoverResult {
@@ -51,9 +56,10 @@ export interface AutoDiscoverResult {
   totalRaw: number;
   totalUnique: number;
   totalPassedGate: number;
-  minScoreUsed: number;
+  minWowUsed: number;
+  discoverMode: "wow";
   executionTimeSeconds: number;
-  scoreStats: DiscoverScoreStats;
+  wowStats: WowScoreStats;
   results: ScoredDiscoverListing[];
   /** Top scored items that did not pass the pick threshold */
   rejectedResults: ScoredDiscoverListing[];
@@ -75,15 +81,9 @@ function isRateLimitError(err: unknown): boolean {
   return false;
 }
 
-function computeScoreStats(scores: number[]): DiscoverScoreStats {
+function computeWowStats(scores: number[]): WowScoreStats {
   if (!scores.length) {
-    return {
-      maxScore: 0,
-      medianScore: 0,
-      countAtLeast80: 0,
-      countAtLeast70: 0,
-      countAtLeast60: 0,
-    };
+    return { maxWow: 0, medianWow: 0, countAtLeast8: 0, countAtLeast7: 0 };
   }
   const sorted = [...scores].sort((a, b) => a - b);
   const mid = Math.floor(sorted.length / 2);
@@ -91,13 +91,32 @@ function computeScoreStats(scores: number[]): DiscoverScoreStats {
     sorted.length % 2 === 0
       ? Math.round((sorted[mid - 1]! + sorted[mid]!) / 2)
       : sorted[mid]!;
-
   return {
-    maxScore: sorted[sorted.length - 1]!,
-    medianScore: median,
-    countAtLeast80: scores.filter((s) => s >= 80).length,
-    countAtLeast70: scores.filter((s) => s >= 70).length,
-    countAtLeast60: scores.filter((s) => s >= 60).length,
+    maxWow: sorted[sorted.length - 1]!,
+    medianWow: median,
+    countAtLeast8: scores.filter((s) => s >= 8).length,
+    countAtLeast7: scores.filter((s) => s >= 7).length,
+  };
+}
+
+function buildScoredListing(
+  item: AliExpressListing,
+  keyword: string,
+  wowScore: number,
+  flags: string[],
+  insight?: { stopReasonAr?: string; problemAr?: string },
+): ScoredDiscoverListing {
+  return {
+    ...item,
+    wowScore,
+    wowFlags: flags,
+    wowStopReasonAr: insight?.stopReasonAr,
+    wowProblemAr: insight?.problemAr,
+    matchedKeyword: keyword,
+    discoverFinalScore: wowToDisplayScore(wowScore),
+    discoveryScore: wowToDisplayScore(wowScore),
+    aiScore: wowToDisplayScore(wowScore),
+    hookAr: insight?.stopReasonAr || item.hookAr,
   };
 }
 
@@ -120,8 +139,8 @@ export class AutoDiscoverService {
     }
 
     const keywordLimit = Math.min(Math.max(options.keywordLimit ?? 15, 10), 20);
-    const minScore = options.minScore ?? 68;
-    const fallbackMinScore = options.fallbackMinScore ?? 60;
+    const minWow = options.minWow ?? 7;
+    const fallbackMinWow = options.fallbackMinWow ?? 6;
     const maxResults = Math.min(Math.max(options.maxResults ?? 12, 3), 24);
 
     let keywords: string[] = [];
@@ -183,21 +202,18 @@ export class AutoDiscoverService {
         scanned += 1;
 
         for (const item of items) {
-          const breakdown = computeDiscoverScore(item, {
-            targetYear: CURRENT_YEAR,
-            matchedKeyword: keyword,
-          });
-          const scored: ScoredDiscoverListing = {
-            ...item,
-            discoverFinalScore: breakdown.finalScore,
-            discoverBreakdown: breakdown,
-            matchedKeyword: keyword,
-            discoveryScore: breakdown.finalScore,
-            aiScore: breakdown.finalScore,
-          };
+          const heuristic = computeWowHeuristic(item, keyword);
+          if (heuristic.flags.includes("مرفوض")) continue;
+
+          const scored = buildScoredListing(
+            item,
+            keyword,
+            heuristic.wowScore,
+            heuristic.flags,
+          );
 
           const existing = byId.get(item.aliexpressId);
-          if (!existing || scored.discoverFinalScore > existing.discoverFinalScore) {
+          if (!existing || scored.wowScore > existing.wowScore) {
             byId.set(item.aliexpressId, scored);
           }
         }
@@ -215,27 +231,41 @@ export class AutoDiscoverService {
       }
     }
 
-    const all = [...byId.values()].sort(
-      (a, b) => b.discoverFinalScore - a.discoverFinalScore,
-    );
-    const scoreStats = computeScoreStats(all.map((x) => x.discoverFinalScore));
+    let all = [...byId.values()].sort((a, b) => b.wowScore - a.wowScore);
 
-    let minScoreUsed = minScore;
-    let passed = all.filter((item) =>
-      passesDiscoverPick(item, minScore, {
-        targetYear: CURRENT_YEAR,
-        matchedKeyword: item.matchedKeyword,
-      }),
-    );
+    // AI wow batch on top heuristic candidates (1 call — cheap)
+    if (options.env?.AI && all.length > 0) {
+      const candidates = all.slice(0, 22);
+      const insights = await new WowAnalyzerService(options.env).analyzeBatch(
+        candidates,
+        cat.labelAr,
+        minWow,
+      );
+
+      all = all.map((item) => {
+        const insight = insights.get(item.aliexpressId.replace(/\D/g, ""));
+        if (!insight) return item;
+
+        const blended = Math.round(
+          insight.wowScore * 0.65 + item.wowScore * 0.35,
+        );
+        const finalWow = Math.max(1, Math.min(10, blended));
+        return buildScoredListing(item, item.matchedKeyword, finalWow, item.wowFlags ?? [], {
+          stopReasonAr: insight.stopReasonAr,
+          problemAr: insight.problemAr,
+        });
+      });
+      all.sort((a, b) => b.wowScore - a.wowScore);
+    }
+
+    const wowStats = computeWowStats(all.map((x) => x.wowScore));
+
+    let minWowUsed = minWow;
+    let passed = all.filter((item) => passesWowGate(item.wowScore, minWow));
 
     if (passed.length < 3) {
-      minScoreUsed = fallbackMinScore;
-      passed = all.filter((item) =>
-        passesDiscoverPick(item, fallbackMinScore, {
-          targetYear: CURRENT_YEAR,
-          matchedKeyword: item.matchedKeyword,
-        }),
-      );
+      minWowUsed = fallbackMinWow;
+      passed = all.filter((item) => passesWowGate(item.wowScore, fallbackMinWow));
     }
 
     const results = passed.slice(0, maxResults).map((item) => ({
@@ -250,21 +280,21 @@ export class AutoDiscoverService {
       .map((item) => ({
         ...item,
         discoverRejected: true,
-        discoverRejectReason: explainRejectReason(item, minScoreUsed, {
-          targetYear: CURRENT_YEAR,
-          matchedKeyword: item.matchedKeyword,
-        }),
+        discoverRejectReason: explainWowReject(
+          item.wowScore,
+          item.wowFlags ?? [],
+          minWowUsed,
+        ),
       }));
 
     let warning: string | undefined;
     if (!results.length) {
       warning =
-        `ما في منتجات بscore ${minScore}+ — أعلى score: ${scoreStats.maxScore} · متوسط: ${scoreStats.medianScore} — اضغط «عرض المُتجاهَل»`;
-    } else if (minScoreUsed < minScore) {
-      warning =
-        `يوم أضعف — عرضنا ${results.length} منتج (≥ ${minScoreUsed}) بدل ${minScore}`;
+        `ما في منتجات إبهار ${minWow}/10+ — أعلى إبهار: ${wowStats.maxWow}/10 — اضغط «عرض المُتجاهَل»`;
+    } else if (minWowUsed < minWow) {
+      warning = `يوم أضعف — عرضنا ${results.length} منتج (إبهار ≥ ${minWowUsed})`;
     } else if (results.length < 5) {
-      warning = `${results.length} منتج قوي — راجع المُتجاهَل للباقي`;
+      warning = `${results.length} منتج يثبت — راجع المُتجاهَل`;
     }
 
     const executionTimeSeconds = Math.round((Date.now() - start) / 100) / 10;
@@ -278,9 +308,10 @@ export class AutoDiscoverService {
       totalRaw,
       totalUnique: all.length,
       totalPassedGate: passed.length,
-      minScoreUsed,
+      minWowUsed,
+      discoverMode: "wow",
       executionTimeSeconds,
-      scoreStats,
+      wowStats,
       results,
       rejectedResults,
       warning,
