@@ -303,7 +303,7 @@ export function renderDashboardPage(storeDomain: string): string {
           <button class="btn btn-accent" id="searchBtn" type="button">بحث</button>
         </div>
         <div id="presetTip" class="hidden"></div>
-        <p class="hint" id="aiStatusHint">العناوين من ar.aliexpress.com · البحث الذكي يجلب صفحات متعددة ويرتّب النتائج</p>
+        <p class="hint" id="aiStatusHint">العناوين تُترجم تلقائيًا للعربية عبر Workers AI بعد كل بحث</p>
 
         <details class="more" id="advancedFilters">
           <summary>فلاتر متقدمة + فئة (اختياري)</summary>
@@ -1335,8 +1335,8 @@ export function renderDashboardPage(storeDomain: string): string {
         const res = await api("/api/ai/status");
         const d = res.data || {};
         $("aiStatusHint").textContent = d.workersAi
-          ? "✅ Workers AI مفعّل — اضغط 🤖 على أي منتج للتحليل"
-          : "العناوين من ar.aliexpress.com · Workers AI: أعد نشر Worker بعد تفعيل [ai] في wrangler.toml";
+          ? "✅ Workers AI مفعّل — العناوين تُترجم للعربية تلقائيًا بعد البحث"
+          : "⚠️ Workers AI غير مفعّل — العناوين ستظهر بالإنجليزي من AliExpress";
       } catch (_) { /* ignore */ }
     }
 

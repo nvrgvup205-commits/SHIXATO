@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { DROPSHIP_PRESETS, buildPresetSearch, type DropshipGrade } from "../data/dropship-presets";
 import { ImportPipeline } from "../services/pipeline";
+import { localizeSearchResults } from "../services/search-localize";
 import type { Env, ImportProductInput } from "../types";
 import { requireAuth } from "../utils/session";
 import { HttpError } from "../utils/http";
@@ -39,10 +40,11 @@ favorites.post("/smart-search", requireAuth, async (c) => {
     });
     const { AliExpressService } = await import("../services/aliexpress");
     const data = await new AliExpressService().search(filters);
+    const localized = await localizeSearchResults(c.env, data, filters.locale);
     return c.json({
       ok: true,
       data: {
-        ...data,
+        ...localized,
         presetGrade: grade,
         presetLabelAr: DROPSHIP_PRESETS.find((p) => p.id === grade)?.labelAr,
       },

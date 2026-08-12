@@ -151,6 +151,8 @@ export interface AliExpressListing {
   shippingCostCurrency?: string;
   isLocalWarehouse?: boolean;
   storeLaunchDate?: string;
+  /** Original English title when auto-translated to Arabic */
+  titleEn?: string;
 }
 
 export interface AliExpressSearchResult {
@@ -169,6 +171,8 @@ export interface AliExpressSearchResult {
   /** Arabic/English hint when filters wipe results or AE soft-fails */
   warning?: string;
   usedFallbackUrl?: boolean;
+  /** Count of titles auto-translated to Arabic */
+  titlesTranslated?: number;
 }
 
 export type { ProductSearchFilters, SearchSort } from "./search";

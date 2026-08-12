@@ -8,7 +8,11 @@ export interface ProductAiAnalysis extends AiFilterResult {
   aiProvider: "workers-ai" | "heuristic";
 }
 
-const MODEL = "@cf/meta/llama-3.1-8b-instruct";
+const MODEL = "@cf/meta/llama-3.1-8b-instruct-fast";
+
+export function hasArabicText(text: string): boolean {
+  return /[\u0600-\u06FF]/.test(text);
+}
 
 /**
  * Product analysis via Cloudflare Workers AI (with heuristic fallback).
@@ -29,6 +33,92 @@ export class WorkersAiService {
       }
     }
     return this.analyzeHeuristic(listing, context);
+  }
+
+  /**
+   * AliExpress search JSON often returns English titles even on ar.aliexpress.com.
+   * Batch-translate listing titles to Arabic via Workers AI when needed.
+   */
+  async arabicTitles(listings: AliExpressListing[]): Promise<{
+    listings: AliExpressListing[];
+    translated: number;
+    provider: "workers-ai" | "none";
+  }> {
+    const toTranslate = listings.filter((l) => l.title && !hasArabicText(l.title));
+    if (!toTranslate.length) {
+      return { listings, translated: 0, provider: "none" };
+    }
+
+    if (!this.env.AI) {
+      return { listings, translated: 0, provider: "none" };
+    }
+
+    const titleMap = new Map<string, string>();
+    const batchSize = 18;
+
+    for (let i = 0; i < toTranslate.length; i += batchSize) {
+      const batch = toTranslate.slice(i, i + batchSize);
+      const chunkMap = await this.translateTitleBatch(batch);
+      for (const [id, titleAr] of chunkMap) {
+        titleMap.set(id, titleAr);
+      }
+    }
+
+    let translated = 0;
+    const out = listings.map((listing) => {
+      const titleAr = titleMap.get(listing.aliexpressId);
+      if (!titleAr || hasArabicText(listing.title)) return listing;
+      translated += 1;
+      return {
+        ...listing,
+        titleEn: listing.titleEn ?? listing.title,
+        title: titleAr,
+      };
+    });
+
+    return { listings: out, translated, provider: "workers-ai" };
+  }
+
+  private async translateTitleBatch(
+    batch: AliExpressListing[],
+  ): Promise<Map<string, string>> {
+    const payload = batch.map((l) => ({
+      id: l.aliexpressId,
+      title: l.title.slice(0, 180),
+    }));
+
+    const prompt = `Translate AliExpress product titles to natural Arabic for Saudi e-commerce shoppers.
+Keep brand names and model numbers (USB, RGB, 4K, iPhone, etc.) as-is.
+Return JSON ONLY:
+{"items":[{"id":"123","titleAr":"..."}]}
+
+Titles:
+${JSON.stringify(payload)}`;
+
+    const result = await this.env.AI!.run(MODEL, {
+      messages: [
+        {
+          role: "system",
+          content: "You output strict JSON only. Translate product titles to Arabic.",
+        },
+        { role: "user", content: prompt },
+      ],
+      max_tokens: 1200,
+      temperature: 0.1,
+    });
+
+    const parsed = this.parseJsonFromText(this.extractAiText(result));
+    const items = Array.isArray(parsed.items)
+      ? (parsed.items as Array<Record<string, unknown>>)
+      : [];
+
+    const map = new Map<string, string>();
+    for (const row of items) {
+      const id = String(row.id ?? "");
+      const titleAr = String(row.titleAr ?? row.title ?? "").trim();
+      if (id && titleAr) map.set(id, titleAr);
+    }
+    return map;
   }
 
   private analyzeHeuristic(
