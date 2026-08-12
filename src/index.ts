@@ -37,7 +37,8 @@ app.get("/", (c) => {
     endpoints: {
       health: "GET /health",
       login: "POST /api/auth/login",
-      search: "POST /api/products/search",
+      search: "POST /api/products/search (marketplace: aliexpress|temu|shein)",
+      compare: "POST /api/products/compare",
       smartSearch: "POST /api/favorites/smart-search",
       autoDiscover: "POST /api/discover/auto",
       aiAnalyze: "POST /api/ai/analyze",

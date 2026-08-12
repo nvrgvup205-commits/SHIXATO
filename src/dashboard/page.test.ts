@@ -26,9 +26,11 @@ describe("renderDashboardPage", () => {
     expect(html).toContain('("loginBtn").onclick = login');
   });
 
-  it("includes auto discover banner", () => {
+  it("includes marketplace picker and compare", () => {
     const html = renderDashboardPage("test.myshopify.com");
-    expect(html).toContain('id="autoDiscoverBtn"');
-    expect(html).toContain("اكتشاف تلقائي مبهر");
+    expect(html).toContain('id="marketplace"');
+    expect(html).toContain("Temu");
+    expect(html).toContain("Shein");
+    expect(html).toContain('id="compareBtn"');
   });
 });

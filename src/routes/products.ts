@@ -1,7 +1,11 @@
 import { Hono } from "hono";
 import { AliExpressService } from "../services/aliexpress";
 import { ImportPipeline } from "../services/pipeline";
+import { PriceCompareService } from "../services/price-compare";
+import { SheinService } from "../services/shein";
+import { TemuService } from "../services/temu";
 import type { Env, ImportProductInput, ProductSearchFilters, ProductStatus } from "../types";
+import type { MarketplaceId } from "../types/marketplace";
 import { requireAuth } from "../utils/session";
 import { HttpError } from "../utils/http";
 
@@ -27,11 +31,45 @@ products.get("/", requireAuth, async (c) => {
   return c.json({ ok: true, data: rows.slice(0, limit) });
 });
 
-/** Keyword search on AliExpress with rich filters */
+/** Keyword search on AliExpress / Temu / Shein */
 products.post("/search", requireAuth, async (c) => {
-  const body = (await c.req.json().catch(() => ({}))) as ProductSearchFilters;
+  const body = (await c.req.json().catch(() => ({}))) as ProductSearchFilters & {
+    marketplace?: MarketplaceId;
+  };
+
+  const marketplace = body.marketplace ?? "aliexpress";
+
   try {
+    if (marketplace === "temu") {
+      const data = await new TemuService().search(body);
+      return c.json({ ok: true, data: { ...data, results: data.results } });
+    }
+    if (marketplace === "shein") {
+      const data = await new SheinService().search(body);
+      return c.json({ ok: true, data: { ...data, results: data.results } });
+    }
+
     const data = await new AliExpressService().search(body);
+    return c.json({ ok: true, data });
+  } catch (err) {
+    if (err instanceof HttpError) {
+      return c.json(
+        { ok: false, error: err.message, details: err.details ?? null },
+        err.status as 400 | 401 | 500 | 502,
+      );
+    }
+    throw err;
+  }
+});
+
+/** Compare prices across AliExpress + Temu + Shein */
+products.post("/compare", requireAuth, async (c) => {
+  const body = (await c.req.json().catch(() => ({}))) as ProductSearchFilters & {
+    marketplaces?: MarketplaceId[];
+  };
+
+  try {
+    const data = await new PriceCompareService().compare(body, body.marketplaces);
     return c.json({ ok: true, data });
   } catch (err) {
     if (err instanceof HttpError) {
