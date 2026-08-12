@@ -335,6 +335,12 @@ export function renderDashboardPage(storeDomain: string): string {
           </div>
         </div>
         <div class="search-topbar">
+          <select id="marketplace" title="المتجر">
+            <option value="aliexpress" selected>AliExpress</option>
+            <option value="temu">Temu</option>
+            <option value="shein">Shein</option>
+            <option value="compare">⚖️ مقارنة 3 متاجر</option>
+          </select>
           <select id="category" title="الفئة — مطلوب للبحث الذكي">${categoryOptions}</select>
           <input id="query" type="search" placeholder="كلمات إضافية داخل الفئة (اختياري)…" />
           <select id="shipToCountry" title="الشحن إلى">
@@ -349,6 +355,7 @@ export function renderDashboardPage(storeDomain: string): string {
           </select>
           <div class="preset-chips" id="presetButtons"></div>
           <button class="btn btn-accent" id="searchBtn" type="button">بحث</button>
+          <button class="btn btn-ghost hidden" id="compareBtn" type="button">⚖️ قارن</button>
         </div>
         <div id="presetTip" class="hidden"></div>
         <p class="hint" id="aiStatusHint">⚡ إبهار المتجر: هل المنتج يثبت الإنسان ويحل مشكلة؟ — مش أرقام مبيعات</p>
@@ -750,6 +757,7 @@ export function renderDashboardPage(storeDomain: string): string {
       return {
         query: $("query").value.trim(),
         category: $("category").value || undefined,
+        marketplace: $("marketplace").value || "aliexpress",
         page: 1,
         sort: $("sort").value,
         minPrice: num("minPrice"),
@@ -1274,6 +1282,10 @@ export function renderDashboardPage(storeDomain: string): string {
         if (item.matchedKeyword) {
           flags.push('<span class="badge">🔎 ' + escapeHtml(item.matchedKeyword) + "</span>");
         }
+        if (item.marketplace) {
+          const mpLabel = item.marketplace === "temu" ? "تيمو" : item.marketplace === "shein" ? "شي إن" : "AliExpress";
+          flags.push('<span class="badge" style="background:#10231f;color:#fff">🏪 ' + escapeHtml(mpLabel) + "</span>");
+        }
         if (itemIsSuspicious(item)) {
           flags.push('<span class="badge" style="background:#fee4e2;color:#b42318">⚠️ أرقام مشبوهة</span>');
         }
@@ -1312,6 +1324,9 @@ export function renderDashboardPage(storeDomain: string): string {
 
     async function runSearch() {
       const filters = collectFilters();
+      if (filters.marketplace === "compare") {
+        return runCompare();
+      }
       if ((!filters.query || filters.query.length < 2) && !filters.category) {
         return toast("اختر فئة أو اكتب كلمة بحث", true);
       }
@@ -1319,40 +1334,49 @@ export function renderDashboardPage(storeDomain: string): string {
       $("searchStatus").textContent = "جاري البحث وتصفية النتائج...";
       $("filterActions").classList.add("hidden");
       try {
+        const mp = filters.marketplace || "aliexpress";
+        const payload = { ...filters };
+        delete payload.marketplace;
         const res = await api("/api/products/search", {
           method: "POST",
-          body: JSON.stringify(filters),
+          body: JSON.stringify({ ...payload, marketplace: mp }),
         });
         const data = res.data || {};
         state.lastSearch = data;
         const items = data.results || [];
+        const mpLabel = mp === "temu" ? "تيمو" : mp === "shein" ? "شي إن" : "AliExpress";
         const via = (data.filtersApplied && data.filtersApplied.categoryLabelAr)
           ? (" · فئة: " + data.filtersApplied.categoryLabelAr)
           : "";
+        const statusNote = data.status && data.status !== "ok"
+          ? (" · " + (data.warning || data.status))
+          : "";
         $("searchStatus").textContent =
-          "نتائج: " + (data.totalAfterFilter ?? items.length) +
-          " بعد الفلتر / " + (data.totalParsed ?? items.length) + " قبل الفلتر المحلي" +
-          " · بحث: " + (data.query || "") + via +
-          (data.warning ? (" — " + data.warning) : "");
+          mpLabel + ": " + (data.totalParsed ?? items.length) + " منتج" +
+          (data.totalAfterFilter != null && mp === "aliexpress"
+            ? (" · " + data.totalAfterFilter + " بعد الفلتر")
+            : "") +
+          " · بحث: " + (data.query || filters.query || "") + via + statusNote +
+          (data.warning && data.status === "ok" ? (" — " + data.warning) : "");
 
         if (data.searchUrl) {
           $("searchUrlRow").classList.remove("hidden");
           $("openSearchAe").href = data.searchUrl;
-          $("openSearchAe").textContent = data.usedFallbackUrl
-            ? "فتح رابط البحث المبسّط على علي إكسبريس (الفلاتر طُبّقت محليًا)"
-            : "فتح رابط البحث على علي إكسبريس (مع الفلاتر)";
+          $("openSearchAe").textContent = "فتح رابط البحث على " + mpLabel;
         } else {
           $("searchUrlRow").classList.add("hidden");
         }
 
-        const wiped = (data.totalParsed > 0 && items.length === 0);
+        const wiped = mp === "aliexpress" && data.totalParsed > 0 && items.length === 0;
         $("filterActions").classList.toggle("hidden", !wiped && !data.warning);
 
         setSearchResults(items);
         if (wiped) {
           toast("الفلاتر استبعدت كل النتائج — جرّب العرض بدون فلتر محلي", true);
         } else if (!items.length) {
-          toast(data.warning || "لا نتائج — خفّف الفلاتر أو غيّر الفئة", true);
+          toast(data.warning || data.error || "لا نتائج", true);
+        } else {
+          toast(mpLabel + ": " + items.length + " منتج");
         }
       } catch (e) {
         $("searchStatus").textContent = "";
@@ -1362,7 +1386,74 @@ export function renderDashboardPage(storeDomain: string): string {
         $("searchBtn").disabled = false;
       }
     }
+
+    async function runCompare() {
+      const filters = collectFilters();
+      const query = filters.query || "";
+      const category = filters.category;
+      if (query.length < 2 && !category) {
+        return toast("اكتب كلمة بحث أو اختر فئة للمقارنة", true);
+      }
+      $("searchBtn").disabled = true;
+      $("compareBtn").disabled = true;
+      $("searchStatus").textContent = "جاري المقارنة بين AliExpress + Temu + Shein…";
+      $("filterActions").classList.add("hidden");
+      try {
+        const payload = { ...filters };
+        delete payload.marketplace;
+        const res = await api("/api/products/compare", {
+          method: "POST",
+          body: JSON.stringify(payload),
+        });
+        const data = res.data || {};
+        state.lastSearch = data;
+        state.lastPreset = "compare";
+
+        const markets = data.markets || [];
+        const summary = markets.map((m) =>
+          (m.labelAr || m.marketplace) + " " + (m.totalParsed || 0) +
+          (m.status !== "ok" ? " (" + m.status + ")" : "")
+        ).join(" · ");
+
+        const allItems = markets.flatMap((m) =>
+          (m.results || []).map((item) => ({
+            ...item,
+            marketplace: item.marketplace || m.marketplace,
+          }))
+        );
+
+        $("searchStatus").textContent =
+          "مقارنة: " + (data.query || query) +
+          " · " + summary +
+          (data.cheapest
+            ? (" · أرخص: " + money(data.cheapest.originalPrice, data.cheapest.currency) +
+              " (" + (data.cheapest.marketplace === "temu" ? "تيمو" : data.cheapest.marketplace === "shein" ? "شي إن" : "AliExpress") + ")")
+            : "") +
+          " · " + (data.executionTimeSeconds || 0) + " ثانية";
+
+        $("searchUrlRow").classList.add("hidden");
+        setSearchResults(allItems);
+
+        if (data.cheapest) {
+          toast("أرخص: " + money(data.cheapest.originalPrice, data.cheapest.currency));
+        } else {
+          toast("لم تُجلب منتجات للمقارنة — راجع الحالة أعلاه", true);
+        }
+      } catch (e) {
+        $("searchStatus").textContent = "";
+        toast(e.message || "فشلت المقارنة", true);
+      } finally {
+        $("searchBtn").disabled = false;
+        $("compareBtn").disabled = false;
+      }
+    }
+
+    $("marketplace").addEventListener("change", () => {
+      const v = $("marketplace").value;
+      $("compareBtn").classList.toggle("hidden", v !== "compare");
+    });
     $("searchBtn").onclick = runSearch;
+    $("compareBtn").onclick = runCompare;
     $("autoDiscoverBtn").onclick = runAutoDiscover;
     $("query").addEventListener("keydown", (e) => { if (e.key === "Enter") runSearch(); });
 
