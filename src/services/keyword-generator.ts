@@ -1,4 +1,5 @@
 import { findCategory } from "../data/categories";
+import { slugifyWholesaleQuery } from "../data/aliexpress-search-url";
 import { getTrendingKeywords } from "../data/trending-keywords";
 import type { Env } from "../types";
 
@@ -27,13 +28,15 @@ export class KeywordGeneratorService {
     }
 
     const capped = Math.min(Math.max(limit, 10), 20);
+    const fromFile = getTrendingKeywords(cat.id, capped);
 
     if (this.env.AI) {
       try {
         const aiKeywords = await this.generateWithWorkersAi(cat.id, cat.labelAr, cat.query, capped);
-        if (aiKeywords.length >= 8) {
+        if (aiKeywords.length >= 4) {
+          const merged = this.mergeKeywordLists(aiKeywords, fromFile, capped);
           return {
-            keywords: aiKeywords.slice(0, capped),
+            keywords: merged,
             source: "workers-ai",
             categoryId: cat.id,
             categoryLabelAr: cat.labelAr,
@@ -43,8 +46,6 @@ export class KeywordGeneratorService {
         console.warn("Workers AI keyword generation failed, using fallback", err);
       }
     }
-
-    const fromFile = getTrendingKeywords(cat.id, capped);
     if (fromFile.length >= 8) {
       return {
         keywords: fromFile,
@@ -113,9 +114,33 @@ Examples (beauty): travel makeup organizer LED, vanity brush holder dust proof, 
     const cleaned = raw
       .map((k) => String(k).trim().toLowerCase())
       .filter((k) => k.length >= 4 && k.length <= 60)
-      .filter((k) => !this.isBannedKeyword(k));
+      .filter((k) => !this.isBannedKeyword(k))
+      .filter((k) => this.isUsableSearchKeyword(k));
 
     return [...new Set(cleaned)].slice(0, limit);
+  }
+
+  private mergeKeywordLists(
+    primary: string[],
+    fallback: string[],
+    limit: number,
+  ): string[] {
+    const out: string[] = [];
+    const seen = new Set<string>();
+    for (const k of [...primary, ...fallback]) {
+      const key = k.trim().toLowerCase();
+      if (!key || seen.has(key) || !this.isUsableSearchKeyword(key)) continue;
+      if (this.isBannedKeyword(key)) continue;
+      seen.add(key);
+      out.push(key);
+      if (out.length >= limit) break;
+    }
+    return out;
+  }
+
+  private isUsableSearchKeyword(k: string): boolean {
+    const slug = slugifyWholesaleQuery(k);
+    return slug.length >= 3 && slug !== "product";
   }
 
   private isBannedKeyword(k: string): boolean {

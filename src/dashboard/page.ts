@@ -1090,20 +1090,44 @@ export function renderDashboardPage(storeDomain: string): string {
     function updateDiscoverActionButtons() {
       const rejected = state.discoverRejected || [];
       const approved = state.discoverApproved || [];
+      const data = state.lastSearch || {};
+      const totalRaw = data.totalRaw ?? 0;
+      const totalUnique = data.totalUnique ?? 0;
+      const previewPool = state.discoverPreviewPool || [];
+      const searchErrors = data.errors || [];
       const rejBtn = $("showRejectedDiscoverBtn");
       const appBtn = $("showApprovedDiscoverBtn");
-      if (rejected.length) {
+      const rawBtn = $("showRawBtn");
+
+      if (rejected.length || totalUnique > 0) {
         rejBtn.classList.remove("hidden");
-        rejBtn.textContent = "عرض المُتجاهَل (" + rejected.length + ")";
+        rejBtn.textContent = rejected.length
+          ? "عرض المُتجاهَل (" + rejected.length + ")"
+          : "عرض المجلوب (" + totalUnique + ")";
       } else {
         rejBtn.classList.add("hidden");
       }
+
       if (approved.length && (state.resultItems || []).some((i) => i.discoverRejected)) {
         appBtn.classList.remove("hidden");
       } else {
         appBtn.classList.add("hidden");
       }
-      $("filterActions").classList.toggle("hidden", !rejected.length && !state.lastSearch?.resultsBeforeFilter);
+
+      const hasRaw =
+        totalRaw > 0 ||
+        previewPool.length > 0 ||
+        (data.resultsBeforeFilter && data.resultsBeforeFilter.length > 0);
+      rawBtn.classList.toggle("hidden", !hasRaw);
+
+      const showActions =
+        rejected.length > 0 ||
+        totalUnique > 0 ||
+        totalRaw > 0 ||
+        previewPool.length > 0 ||
+        searchErrors.length > 0 ||
+        Boolean(data.resultsBeforeFilter && data.resultsBeforeFilter.length);
+      $("filterActions").classList.toggle("hidden", !showActions);
     }
 
     async function runAutoDiscover() {
@@ -1140,18 +1164,22 @@ export function renderDashboardPage(storeDomain: string): string {
 
         state.discoverApproved = items;
         state.discoverRejected = data.rejectedResults || [];
+        state.discoverPreviewPool = data.previewPool || [];
 
         const stats = data.wowStats || data.scoreStats || {};
         const minUsed = data.minWowUsed ?? data.minScoreUsed ?? 7;
+        const errCount = (data.errors || []).length;
         $("searchStatus").textContent =
           "إبهار: " + items.length + " منتج يثبت (≥ " + minUsed + "/10) · مُتجاهَل " +
           (state.discoverRejected.length || 0) +
           " · أعلى إبهار " + (stats.maxWow ?? stats.maxScore ?? "—") + "/10" +
           " · متوسط " + (stats.medianWow ?? stats.medianScore ?? "—") +
+          " · مجلوب " + (data.totalRaw || 0) +
           " · " + (data.keywordSource === "workers-ai" ? "كلمات AI" : "كلمات احتياطية") +
-          " · " + (data.keywordsScanned || 0) + " كلمات · " +
+          " · " + (data.keywordsScanned || 0) + " كلمات ناجحة · " +
           (data.totalUnique || 0) + " فريد · " +
           (data.executionTimeSeconds || 0) + " ثانية" +
+          (errCount ? (" · " + errCount + " أخطاء بحث") : "") +
           (data.warning ? (" — " + data.warning) : "");
 
         $("searchUrlRow").classList.add("hidden");
@@ -1160,8 +1188,10 @@ export function renderDashboardPage(storeDomain: string): string {
 
         if (!items.length && state.discoverRejected.length) {
           toast("لا مقبول — اضغط «عرض المُتجاهَل» لترى أفضل ما تم رفضه", true);
+        } else if (!items.length && (data.totalUnique > 0 || state.discoverPreviewPool.length)) {
+          toast("لا مقبول — اضغط «عرض المجلوب» لترى ما تم جلبه", true);
         } else if (!items.length) {
-          toast(data.warning || "لا نتائج", true);
+          toast(data.warning || (errCount ? "فشل جلب المنتجات — راجع الأخطاء في الحالة" : "لا نتائج"), true);
         } else {
           toast("⚡ " + items.length + " منتج مقبول");
         }
@@ -1368,11 +1398,15 @@ export function renderDashboardPage(storeDomain: string): string {
 
     $("showRejectedDiscoverBtn").onclick = () => {
       const rejected = state.discoverRejected || [];
-      if (!rejected.length) return toast("لا توجد نتائج مُتجاهَلة", true);
-      setSearchResults(rejected);
+      const preview = state.discoverPreviewPool || [];
+      const pool = rejected.length ? rejected : preview;
+      if (!pool.length) return toast("لا توجد نتائج لعرضها", true);
+      setSearchResults(pool);
       $("searchStatus").textContent =
-        "عرض " + rejected.length + " منتج مُتجاهَل (أعلى score أولًا) — راجع سبب الرفض على كل كارت";
-      toast("المُتجاهَل: " + rejected.length + " منتج");
+        rejected.length
+          ? "عرض " + rejected.length + " منتج مُتجاهَل — راجع سبب الرفض على كل كارت"
+          : "عرض " + preview.length + " منتج مجلوب (لم يمرّ أي منها عتبة الإبهار)";
+      toast(rejected.length ? ("المُتجاهَل: " + rejected.length) : ("المجلوب: " + preview.length));
     };
 
     $("showApprovedDiscoverBtn").onclick = () => {
@@ -1383,7 +1417,8 @@ export function renderDashboardPage(storeDomain: string): string {
     };
 
     $("showRawBtn").onclick = () => {
-      const raw = (state.lastSearch && state.lastSearch.resultsBeforeFilter) || [];
+      const preview = state.discoverPreviewPool || [];
+      const raw = (state.lastSearch && state.lastSearch.resultsBeforeFilter) || preview || [];
       if (!raw.length) return toast("لا توجد نتائج خام", true);
       setSearchResults(raw);
       $("searchStatus").textContent =
