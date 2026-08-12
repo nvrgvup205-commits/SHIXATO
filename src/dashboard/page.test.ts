@@ -13,9 +13,10 @@ describe("renderDashboardPage", () => {
     expect(() => new Function(script)).not.toThrow();
   });
 
-  it("includes login button handler", () => {
+  it("includes post-search local filter bar", () => {
     const html = renderDashboardPage("test.myshopify.com");
-    expect(html).toContain('id="loginBtn"');
-    expect(html).toContain('("loginBtn").onclick = login');
+    expect(html).toContain('id="postSearchFilters"');
+    expect(html).toContain('id="postSort"');
+    expect(html).toContain('id="postShipping"');
   });
 });
