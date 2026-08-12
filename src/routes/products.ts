@@ -1,6 +1,5 @@
 import { Hono } from "hono";
 import { AliExpressService } from "../services/aliexpress";
-import { localizeSearchResults } from "../services/search-localize";
 import { ImportPipeline } from "../services/pipeline";
 import type { Env, ImportProductInput, ProductSearchFilters, ProductStatus } from "../types";
 import { requireAuth } from "../utils/session";
@@ -33,8 +32,7 @@ products.post("/search", requireAuth, async (c) => {
   const body = (await c.req.json().catch(() => ({}))) as ProductSearchFilters;
   try {
     const data = await new AliExpressService().search(body);
-    const localized = await localizeSearchResults(c.env, data, body.locale);
-    return c.json({ ok: true, data: localized });
+    return c.json({ ok: true, data });
   } catch (err) {
     if (err instanceof HttpError) {
       return c.json(

@@ -2,6 +2,8 @@ import type { AiFilterResult, AliExpressListing, Env } from "../types";
 
 export interface ProductAiAnalysis extends AiFilterResult {
   suggestedSellingPrice?: number;
+  /** Short Saudi-dialect marketing hook (scroll-stopper) */
+  hookAr?: string;
   adCopyAr?: string;
   pros?: string[];
   cons?: string[];
@@ -33,92 +35,6 @@ export class WorkersAiService {
       }
     }
     return this.analyzeHeuristic(listing, context);
-  }
-
-  /**
-   * AliExpress search JSON often returns English titles even on ar.aliexpress.com.
-   * Batch-translate listing titles to Arabic via Workers AI when needed.
-   */
-  async arabicTitles(listings: AliExpressListing[]): Promise<{
-    listings: AliExpressListing[];
-    translated: number;
-    provider: "workers-ai" | "none";
-  }> {
-    const toTranslate = listings.filter((l) => l.title && !hasArabicText(l.title));
-    if (!toTranslate.length) {
-      return { listings, translated: 0, provider: "none" };
-    }
-
-    if (!this.env.AI) {
-      return { listings, translated: 0, provider: "none" };
-    }
-
-    const titleMap = new Map<string, string>();
-    const batchSize = 18;
-
-    for (let i = 0; i < toTranslate.length; i += batchSize) {
-      const batch = toTranslate.slice(i, i + batchSize);
-      const chunkMap = await this.translateTitleBatch(batch);
-      for (const [id, titleAr] of chunkMap) {
-        titleMap.set(id, titleAr);
-      }
-    }
-
-    let translated = 0;
-    const out = listings.map((listing) => {
-      const titleAr = titleMap.get(listing.aliexpressId);
-      if (!titleAr || hasArabicText(listing.title)) return listing;
-      translated += 1;
-      return {
-        ...listing,
-        titleEn: listing.titleEn ?? listing.title,
-        title: titleAr,
-      };
-    });
-
-    return { listings: out, translated, provider: "workers-ai" };
-  }
-
-  private async translateTitleBatch(
-    batch: AliExpressListing[],
-  ): Promise<Map<string, string>> {
-    const payload = batch.map((l) => ({
-      id: l.aliexpressId,
-      title: l.title.slice(0, 180),
-    }));
-
-    const prompt = `Translate AliExpress product titles to natural Arabic for Saudi e-commerce shoppers.
-Keep brand names and model numbers (USB, RGB, 4K, iPhone, etc.) as-is.
-Return JSON ONLY:
-{"items":[{"id":"123","titleAr":"..."}]}
-
-Titles:
-${JSON.stringify(payload)}`;
-
-    const result = await this.env.AI!.run(MODEL, {
-      messages: [
-        {
-          role: "system",
-          content: "You output strict JSON only. Translate product titles to Arabic.",
-        },
-        { role: "user", content: prompt },
-      ],
-      max_tokens: 1200,
-      temperature: 0.1,
-    });
-
-    const parsed = this.parseJsonFromText(this.extractAiText(result));
-    const items = Array.isArray(parsed.items)
-      ? (parsed.items as Array<Record<string, unknown>>)
-      : [];
-
-    const map = new Map<string, string>();
-    for (const row of items) {
-      const id = String(row.id ?? "");
-      const titleAr = String(row.titleAr ?? row.title ?? "").trim();
-      if (id && titleAr) map.set(id, titleAr);
-    }
-    return map;
   }
 
   private analyzeHeuristic(
@@ -163,6 +79,7 @@ ${JSON.stringify(payload)}`;
 
     score = Math.max(0, Math.min(100, score));
     const approved = score >= 55;
+    const shortName = listing.title.split(/[,\-–|]/)[0]?.trim() || listing.title;
 
     return {
       approved,
@@ -170,11 +87,10 @@ ${JSON.stringify(payload)}`;
       reason: approved
         ? "منتج مناسب للتجربة حسب البيانات المتاحة"
         : "يحتاج مراجعة إضافية قبل الإعلان",
-      suggestedTitle: listing.title,
+      suggestedTitle: `🔥 ${shortName} — ترند الحين ولا تفوّتها!`,
+      hookAr: "يا جماعة الخير، هالقطعة صارت ترند ومبيعاتها طايرة!",
       suggestedSellingPrice,
-      adCopyAr: listing.title
-        ? `🔥 ${listing.title} — اطلبه الآن مع شحن سريع إلى ${context?.shipToCountry ?? "السعودية"}!`
-        : undefined,
+      adCopyAr: `تخيلوا ترتبون سيارتكم/بيتكم بسهولة 😍 ${shortName} — اطلبها الحين قبل تخلص!`,
       pros,
       cons,
       tags: ["heuristic"],
@@ -189,19 +105,24 @@ ${JSON.stringify(payload)}`;
     const shipTo = context?.shipToCountry ?? "SA";
     const margin = context?.targetMarginPercent ?? 40;
 
-    const prompt = `أنت خبير دروب شيبنج للسوق العربي (${shipTo}).
-حلّل منتج AliExpress التالي وأرجع JSON فقط بهذا الشكل:
-{"approved":boolean,"score":number,"reason":string,"suggestedTitle":string,"suggestedSellingPrice":number,"adCopyAr":string,"pros":string[],"cons":string[],"tags":string[]}
+    const prompt = `أنت خبير دروب شيبنج وكتابة إعلانات TikTok/Snapchat للسوق السعودي (${shipTo}).
+حلّل منتج AliExpress وأرجع JSON فقط:
+{"approved":boolean,"score":number,"reason":string,"suggestedTitle":string,"hookAr":string,"suggestedSellingPrice":number,"adCopyAr":string,"pros":string[],"cons":string[],"tags":string[]}
 
-القواعد:
-- approved=true إذا المنتج قابل للبيع في متجر عربي (ليس مقلد/سلاح/بالغ)
+قواعد اللغة (مهم جدًا):
+- suggestedTitle: عنوان منتج للمتجر بلهجة سعودية طبيعية (مو فصحى رسمية) + هوك قوي قصير
+- hookAr: جملة افتتاحية سعودية توقف السكرول (مثل: يا جماعة الخير / ترا هالقطعة / لا يفوتكم)
+- adCopyAr: نص إعلان 2-3 جمل بلهجة سعودية مع إيموجي مناسب لـ TikTok/Snapchat
+- استخدم كلمات سعودية طبيعية: "الحين"، "مرة"، "يا حبيبي"، "تفوّت"، "طاير"، "كذا" — بدون مبالغة مزعجة
+- احتفظ بأسماء الماركات والموديلات بالإنجليزي (USB, RGB, iPhone…)
+
+قواعد التحليل:
+- approved=true إذا المنتج قابل للبيع (ليس مقلد/سلاح/بالغ)
 - score من 0 إلى 100
-- suggestedTitle بالعربية الفصحى البسيطة
-- suggestedSellingPrice بالدولار مع هامش ربح ~${margin}%
-- adCopyAr: جملة إعلان قصيرة بالعربي لـ TikTok/Snapchat
+- suggestedSellingPrice بالدولار مع هامش ~${margin}%
 
 المنتج:
-العنوان: ${listing.title}
+العنوان الأصلي: ${listing.title}
 السعر: ${listing.originalPrice} ${listing.currency}
 المبيعات: ${listing.soldCount ?? "غير معروف"}
 التقييم: ${listing.rating ?? "غير معروف"}
@@ -218,8 +139,8 @@ Choice: ${listing.isChoice ? "نعم" : "لا"}`;
         },
         { role: "user", content: prompt },
       ],
-      max_tokens: 700,
-      temperature: 0.2,
+      max_tokens: 900,
+      temperature: 0.35,
     });
 
     const text = this.extractAiText(result);
@@ -230,6 +151,7 @@ Choice: ${listing.isChoice ? "نعم" : "لا"}`;
       score: Math.round(Number(parsed.score) || 0),
       reason: String(parsed.reason || "تحليل Workers AI"),
       suggestedTitle: String(parsed.suggestedTitle || listing.title),
+      hookAr: String(parsed.hookAr || ""),
       suggestedSellingPrice: Number(parsed.suggestedSellingPrice) || undefined,
       adCopyAr: String(parsed.adCopyAr || ""),
       pros: Array.isArray(parsed.pros) ? parsed.pros.map(String) : [],

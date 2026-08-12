@@ -153,6 +153,10 @@ export interface AliExpressListing {
   storeLaunchDate?: string;
   /** Original English title when auto-translated to Arabic */
   titleEn?: string;
+  /** Saudi marketing hook from AI analysis */
+  hookAr?: string;
+  adCopyAr?: string;
+  aiScore?: number;
 }
 
 export interface AliExpressSearchResult {

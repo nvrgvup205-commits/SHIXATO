@@ -1,7 +1,6 @@
 import { Hono } from "hono";
 import { DROPSHIP_PRESETS, buildPresetSearch, type DropshipGrade } from "../data/dropship-presets";
 import { ImportPipeline } from "../services/pipeline";
-import { localizeSearchResults } from "../services/search-localize";
 import type { Env, ImportProductInput } from "../types";
 import { requireAuth } from "../utils/session";
 import { HttpError } from "../utils/http";
@@ -40,11 +39,10 @@ favorites.post("/smart-search", requireAuth, async (c) => {
     });
     const { AliExpressService } = await import("../services/aliexpress");
     const data = await new AliExpressService().search(filters);
-    const localized = await localizeSearchResults(c.env, data, filters.locale);
     return c.json({
       ok: true,
       data: {
-        ...localized,
+        ...data,
         presetGrade: grade,
         presetLabelAr: DROPSHIP_PRESETS.find((p) => p.id === grade)?.labelAr,
       },
@@ -72,6 +70,12 @@ favorites.post("/", requireAuth, async (c) => {
     listing?: ImportProductInput["listing"];
     notes?: string;
     presetGrade?: string;
+    aiAnalysis?: {
+      suggestedTitle?: string;
+      hookAr?: string;
+      adCopyAr?: string;
+      score?: number;
+    };
   };
 
   const listing = body.listing;
@@ -79,14 +83,34 @@ favorites.post("/", requireAuth, async (c) => {
     return c.json({ ok: false, error: "listing مع aliexpressId و title مطلوب" }, 400);
   }
 
+  const ai = body.aiAnalysis;
+  if (!ai?.suggestedTitle?.trim()) {
+    return c.json(
+      {
+        ok: false,
+        error: "حلّل بالذكاء الاصطناعي أولًا — الترجمة السعودية تُحفظ مع المفضلة فقط",
+      },
+      400,
+    );
+  }
+
+  const enriched = {
+    ...listing,
+    titleEn: listing.titleEn ?? listing.title,
+    title: ai.suggestedTitle.trim(),
+    hookAr: ai.hookAr?.trim() || undefined,
+    adCopyAr: ai.adCopyAr?.trim() || undefined,
+    aiScore: ai.score,
+  };
+
   const pipeline = new ImportPipeline(c.env);
   const row = await pipeline.dbService.upsertFavorite({
-    aliexpress_id: listing.aliexpressId,
-    title: listing.title,
-    original_price: listing.originalPrice ?? 0,
-    currency: listing.currency ?? "USD",
-    listing: listing as unknown as Record<string, unknown>,
-    notes: body.notes ?? null,
+    aliexpress_id: enriched.aliexpressId,
+    title: enriched.title,
+    original_price: enriched.originalPrice ?? 0,
+    currency: enriched.currency ?? "USD",
+    listing: enriched as unknown as Record<string, unknown>,
+    notes: body.notes ?? ai.adCopyAr ?? ai.hookAr ?? null,
     preset_grade: body.presetGrade ?? null,
   });
 

@@ -303,7 +303,7 @@ export function renderDashboardPage(storeDomain: string): string {
           <button class="btn btn-accent" id="searchBtn" type="button">بحث</button>
         </div>
         <div id="presetTip" class="hidden"></div>
-        <p class="hint" id="aiStatusHint">العناوين تُترجم تلقائيًا للعربية عبر Workers AI بعد كل بحث</p>
+        <p class="hint" id="aiStatusHint">البحث بالإنجليزي (مجاني) — الترجمة السعودية + الهوك عند 🤖 ثم حفظ المفضلة</p>
 
         <details class="more" id="advancedFilters">
           <summary>فلاتر متقدمة + فئة (اختياري)</summary>
@@ -512,16 +512,16 @@ export function renderDashboardPage(storeDomain: string): string {
     <div class="badges" id="dBadges"></div>
     <div class="hint" id="dShipDetail" style="margin-top:.5rem"></div>
     <div id="dAiPanel" class="ai-panel hidden"></div>
-    <button class="btn btn-ghost" id="aiAnalyzeBtn" type="button" style="width:100%;margin-top:.65rem">🤖 حلّل بالذكاء الاصطناعي (Cloudflare)</button>
+    <button class="btn btn-ghost" id="aiAnalyzeBtn" type="button" style="width:100%;margin-top:.65rem">🤖 حلّل واكتب عنوان سعودي + هوك</button>
     <label for="dSell" style="margin-top:1rem">سعر البيع (اختياري)</label>
     <input id="dSell" type="number" min="0" step="0.01" placeholder="اتركه فارغًا للهامش التلقائي" />
     <label class="check" style="margin-top:.65rem">
       <input id="dAlsoFavorite" type="checkbox" />
-      أضف للمفضلة أيضًا بعد الرفع (للمراجعة لاحقًا)
+      أضف للمفضلة بعد الرفع (يتطلب تحليل 🤖 أولًا)
     </label>
     <div style="display:flex;gap:.55rem;flex-wrap:wrap;margin-top:.8rem">
       <button class="btn btn-accent" id="importBtn" type="button">رفع إلى Shopify</button>
-      <button class="btn btn-ghost" id="favoriteBtn" type="button">حفظ في المفضلة فقط</button>
+      <button class="btn btn-ghost" id="favoriteBtn" type="button">⭐ حفظ في المفضلة (بعد 🤖)</button>
       <a class="btn btn-ghost" id="openAe" href="#" target="_blank" rel="noopener" style="text-decoration:none;text-align:center">فتح علي إكسبريس</a>
     </div>
     <p class="hint" id="dHint"></p>
@@ -530,7 +530,7 @@ export function renderDashboardPage(storeDomain: string): string {
 
   <script>
     const PRESETS = ${presetsJson};
-    const state = { listing: null, lastSearch: null, addPreview: null, lastPreset: null };
+    const state = { listing: null, lastSearch: null, addPreview: null, lastPreset: null, lastAiAnalysis: null };
 
     const $ = (id) => document.getElementById(id);
     const toast = (msg, err=false) => {
@@ -725,10 +725,31 @@ export function renderDashboardPage(storeDomain: string): string {
       });
     }
 
-    async function saveFavorite(listing, presetGrade) {
+    async function saveFavorite(listing, presetGrade, aiAnalysis) {
+      if (!aiAnalysis?.suggestedTitle) {
+        throw new Error("حلّل بالذكاء الاصطناعي أولًا 🤖 — الترجمة السعودية مع المفضلة فقط");
+      }
+      const enriched = {
+        ...listing,
+        titleEn: listing.titleEn || listing.title,
+        title: aiAnalysis.suggestedTitle,
+        hookAr: aiAnalysis.hookAr || undefined,
+        adCopyAr: aiAnalysis.adCopyAr || undefined,
+        aiScore: aiAnalysis.score,
+      };
       await api("/api/favorites", {
         method: "POST",
-        body: JSON.stringify({ listing, presetGrade: presetGrade || null }),
+        body: JSON.stringify({
+          listing: enriched,
+          presetGrade: presetGrade || null,
+          aiAnalysis: {
+            suggestedTitle: aiAnalysis.suggestedTitle,
+            hookAr: aiAnalysis.hookAr,
+            adCopyAr: aiAnalysis.adCopyAr,
+            score: aiAnalysis.score,
+          },
+          notes: aiAnalysis.adCopyAr || aiAnalysis.hookAr || null,
+        }),
       });
     }
 
@@ -1045,7 +1066,8 @@ export function renderDashboardPage(storeDomain: string): string {
       ).join("");
       $("dSell").value = "";
       $("openAe").href = aeProductUrl(item);
-      $("dHint").textContent = "الرفع يستخدم بيانات بطاقة البحث. ID: " + item.aliexpressId;
+      $("dHint").textContent = "1) اضغط 🤖 للتحليل  2) ثم ⭐ للمفضلة بالعنوان السعودي · ID: " + item.aliexpressId;
+      state.lastAiAnalysis = null;
       $("dAiPanel").classList.add("hidden");
       $("dAiPanel").innerHTML = "";
       $("drawer").classList.add("open");
@@ -1055,6 +1077,7 @@ export function renderDashboardPage(storeDomain: string): string {
       $("drawer").classList.remove("open");
       $("backdrop").classList.remove("open");
       state.listing = null;
+      state.lastAiAnalysis = null;
     }
     $("closeDrawer").onclick = closeDrawer;
     $("backdrop").onclick = closeDrawer;
@@ -1075,20 +1098,23 @@ export function renderDashboardPage(storeDomain: string): string {
           }),
         });
         const a = res.data || {};
+        state.lastAiAnalysis = a;
         const pros = (a.pros || []).map((x) => "<li>✅ " + escapeHtml(x) + "</li>").join("");
         const cons = (a.cons || []).map((x) => "<li>⚠️ " + escapeHtml(x) + "</li>").join("");
         panel.innerHTML =
           '<div class="score">' + escapeHtml(String(a.score || 0)) + '/100 ' +
           (a.approved ? "✅ مناسب" : "⏸ راجع") + "</div>" +
           "<div>" + escapeHtml(a.reason || "") + "</div>" +
-          (a.suggestedTitle ? ("<div style='margin-top:.4rem'><b>عنوان مقترح:</b> " + escapeHtml(a.suggestedTitle) + "</div>") : "") +
+          (a.hookAr ? ("<div style='margin-top:.5rem'><b>الهوك:</b> " + escapeHtml(a.hookAr) + "</div>") : "") +
+          (a.suggestedTitle ? ("<div style='margin-top:.4rem'><b>عنوان سعودي للمتجر:</b> " + escapeHtml(a.suggestedTitle) + "</div>") : "") +
           (a.suggestedSellingPrice ? ("<div><b>سعر بيع مقترح:</b> " + money(a.suggestedSellingPrice) + "</div>") : "") +
           (a.adCopyAr ? ("<div style='margin-top:.4rem'><b>نص إعلان:</b> " + escapeHtml(a.adCopyAr) + "</div>") : "") +
           (pros ? ("<ul>" + pros + "</ul>") : "") +
           (cons ? ("<ul>" + cons + "</ul>") : "") +
-          '<div class="sub">' + (a.aiEnabled ? "Workers AI" : "تحليل تلقائي (فعّل Workers AI)") + "</div>";
+          '<div class="sub">' + (a.aiEnabled ? "Workers AI — اضغط ⭐ لحفظ العنوان في المفضلة" : "تحليل تلقائي (فعّل Workers AI)") + "</div>";
         if (a.suggestedSellingPrice) $("dSell").value = String(a.suggestedSellingPrice);
-        toast("تم التحليل");
+        $("dHint").textContent = "تم التحليل ✅ — اضغط ⭐ حفظ في المفضلة بالعنوان السعودي";
+        toast("تم التحليل — جاهز للحفظ في المفضلة");
       } catch (e) {
         panel.innerHTML = escapeHtml(e.message || "فشل التحليل");
         toast(e.message || "فشل التحليل", true);
@@ -1112,7 +1138,11 @@ export function renderDashboardPage(storeDomain: string): string {
           }),
         });
         if ($("dAlsoFavorite").checked) {
-          await saveFavorite(state.listing, state.lastPreset);
+          if (!state.lastAiAnalysis?.suggestedTitle) {
+            toast("حلّل بالذكاء الاصطناعي أولًا قبل الإضافة للمفضلة", true);
+          } else {
+            await saveFavorite(state.listing, state.lastPreset, state.lastAiAnalysis);
+          }
         }
         toast(res.data && res.data.synced ? "تم الرفع إلى Shopify" : "تم الحفظ بدون مزامنة كاملة");
         closeDrawer();
@@ -1127,8 +1157,8 @@ export function renderDashboardPage(storeDomain: string): string {
       if (!state.listing) return;
       $("favoriteBtn").disabled = true;
       try {
-        await saveFavorite(state.listing, state.lastPreset);
-        toast("تم الحفظ في المفضلة للمراجعة");
+        await saveFavorite(state.listing, state.lastPreset, state.lastAiAnalysis);
+        toast("تم الحفظ في المفضلة بالعنوان السعودي 🇸🇦");
         closeDrawer();
       } catch (e) {
         toast(e.message || "فشل الحفظ", true);
@@ -1179,10 +1209,12 @@ export function renderDashboardPage(storeDomain: string): string {
           const img = listing.image || (listing.images && listing.images[0]) || "";
           const card = document.createElement("div");
           card.className = "fav-card";
+          const hook = listing.hookAr || (fav.notes && !listing.adCopyAr ? fav.notes : "");
           card.innerHTML =
             '<img src="' + escapeHtml(img) + '" alt="" loading="lazy" />' +
             '<div style="flex:1;min-width:0">' +
             "<strong style='display:block;line-height:1.35'>" + escapeHtml(fav.title) + "</strong>" +
+            (hook ? ("<div class='sub' style='margin-top:.25rem;color:var(--accent)'>" + escapeHtml(hook) + "</div>") : "") +
             '<div class="sub">' + money(fav.original_price, fav.currency) +
             " · ID " + escapeHtml(fav.aliexpress_id) + "</div>" +
             '<div class="fav-actions">' +
@@ -1335,8 +1367,8 @@ export function renderDashboardPage(storeDomain: string): string {
         const res = await api("/api/ai/status");
         const d = res.data || {};
         $("aiStatusHint").textContent = d.workersAi
-          ? "✅ Workers AI مفعّل — العناوين تُترجم للعربية تلقائيًا بعد البحث"
-          : "⚠️ Workers AI غير مفعّل — العناوين ستظهر بالإنجليزي من AliExpress";
+          ? "✅ Workers AI — الترجمة السعودية + الهوك عند 🤖 ثم ⭐ المفضلة فقط"
+          : "⚠️ Workers AI غير مفعّل — التحليل والترجمة السعودية غير متاحة";
       } catch (_) { /* ignore */ }
     }
 
