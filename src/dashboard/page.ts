@@ -247,7 +247,25 @@ export function renderDashboardPage(storeDomain: string): string {
       margin-top: .55rem; padding: .55rem .7rem; border-radius: 10px;
       background: rgba(232,255,87,.35); font-size: .84rem; line-height: 1.45;
     }
-    .fav-card {
+    .post-filters {
+      margin: .5rem 0 .75rem; padding: .65rem .75rem; border-radius: 12px;
+      border: 1px solid var(--line); background: rgba(255,255,255,.9);
+    }
+    .post-filters.hidden { display: none; }
+    .post-filters-row {
+      display: flex; gap: .5rem; flex-wrap: wrap; align-items: center;
+    }
+    .post-filters-row label {
+      font-size: .82rem; margin: 0; display: flex; align-items: center; gap: .35rem;
+      font-weight: 600;
+    }
+    .post-filters-row select {
+      width: auto; min-width: 150px; padding: .45rem .55rem; font-size: .85rem;
+    }
+    .post-filters-row .check {
+      padding: .35rem .55rem; font-size: .82rem; width: auto;
+    }
+    .post-filters-row .check input { width: auto; }
       display: flex; gap: .75rem; align-items: flex-start; padding: .75rem;
       border: 1px solid var(--line); border-radius: 14px; background: #fff; margin-bottom: .65rem;
     }
@@ -427,6 +445,31 @@ export function renderDashboardPage(storeDomain: string): string {
           <button class="btn btn-ghost" id="showRawBtn" type="button">عرض النتائج بدون فلتر محلي</button>
           <button class="btn btn-ghost" id="clearLocalFiltersBtn" type="button">مسح الفلاتر المحلية القاسية</button>
         </div>
+        <div id="postSearchFilters" class="post-filters hidden">
+          <div class="post-filters-row">
+            <label>ترتيب
+              <select id="postSort">
+                <option value="default">كما ظهرت</option>
+                <option value="price_asc">السعر ↑ (أرخص أولًا)</option>
+                <option value="price_desc">السعر ↓ (أغلى أولًا)</option>
+                <option value="sold_desc">الأكثر مبيعًا</option>
+                <option value="sold_asc">الأقل مبيعًا</option>
+                <option value="rating_desc">أعلى تقييم</option>
+              </select>
+            </label>
+            <label>الشحن
+              <select id="postShipping">
+                <option value="all">الكل</option>
+                <option value="free">مجاني فقط</option>
+                <option value="paid">مدفوع / غير مجاني</option>
+              </select>
+            </label>
+            <label class="check"><input id="postChoiceOnly" type="checkbox" /> Choice فقط</label>
+            <label class="check"><input id="postHighRated" type="checkbox" /> تقييم 4.5+</label>
+            <button class="btn btn-ghost" id="postFilterReset" type="button">إعادة ضبط</button>
+          </div>
+          <div id="postFilterStatus" class="hint" style="margin:.35rem 0 0"></div>
+        </div>
         <div id="results" class="grid"></div>
       </section>
 
@@ -559,7 +602,7 @@ export function renderDashboardPage(storeDomain: string): string {
 
   <script>
     const PRESETS = ${presetsJson};
-    const state = { listing: null, lastSearch: null, addPreview: null, lastPreset: null, lastAiAnalysis: null };
+    const state = { listing: null, lastSearch: null, addPreview: null, lastPreset: null, lastAiAnalysis: null, resultItems: [] };
 
     const $ = (id) => document.getElementById(id);
     const toast = (msg, err=false) => {
@@ -875,7 +918,7 @@ export function renderDashboardPage(storeDomain: string): string {
 
         const wiped = (data.totalParsed > 0 && items.length === 0);
         $("filterActions").classList.toggle("hidden", !wiped && !data.warning);
-        renderResults(items);
+        setSearchResults(items);
         if (!items.length) {
           toast(data.warning || "لا نتائج — جرّب درجة أخف (مبتدئ)", true);
         } else {
@@ -973,6 +1016,80 @@ export function renderDashboardPage(storeDomain: string): string {
       return lines;
     }
 
+    function itemPrice(item) {
+      const p = Number(item.originalPrice);
+      return Number.isFinite(p) ? p : 0;
+    }
+
+    function itemSold(item) {
+      if (item.soldCount != null) return Number(item.soldCount) || 0;
+      const s = String(item.sold || "");
+      const m = s.match(/([\\d,.]+)\\s*([kK])?/);
+      if (!m) return 0;
+      let n = parseFloat(m[1].replace(/,/g, ""));
+      if (!Number.isFinite(n)) return 0;
+      if (m[2]) n *= 1000;
+      return n;
+    }
+
+    function itemIsFreeShipping(item) {
+      return item.shippingType === "free" ||
+        item.shippingType === "conditional_free" ||
+        Boolean(item.isFreeShipping);
+    }
+
+    function readPostFilterOptions() {
+      return {
+        sort: $("postSort").value,
+        shipping: $("postShipping").value,
+        choiceOnly: $("postChoiceOnly").checked,
+        highRated: $("postHighRated").checked,
+      };
+    }
+
+    function applyPostFilters() {
+      const base = state.resultItems || [];
+      const opts = readPostFilterOptions();
+      let items = base.slice();
+
+      if (opts.shipping === "free") items = items.filter(itemIsFreeShipping);
+      else if (opts.shipping === "paid") items = items.filter((i) => !itemIsFreeShipping(i));
+
+      if (opts.choiceOnly) items = items.filter((i) => i.isChoice);
+      if (opts.highRated) items = items.filter((i) => (Number(i.rating) || 0) >= 4.5);
+
+      if (opts.sort === "price_asc") items.sort((a, b) => itemPrice(a) - itemPrice(b));
+      else if (opts.sort === "price_desc") items.sort((a, b) => itemPrice(b) - itemPrice(a));
+      else if (opts.sort === "sold_desc") items.sort((a, b) => itemSold(b) - itemSold(a));
+      else if (opts.sort === "sold_asc") items.sort((a, b) => itemSold(a) - itemSold(b));
+      else if (opts.sort === "rating_desc") items.sort((a, b) => (Number(b.rating) || 0) - (Number(a.rating) || 0));
+
+      renderResults(items);
+      $("postFilterStatus").textContent =
+        "عرض " + items.length + " من " + base.length + " نتيجة (فلترة محلية بدون بحث جديد)";
+    }
+
+    function resetPostFilters() {
+      $("postSort").value = "default";
+      $("postShipping").value = "all";
+      $("postChoiceOnly").checked = false;
+      $("postHighRated").checked = false;
+      applyPostFilters();
+    }
+
+    function setSearchResults(items) {
+      state.resultItems = items || [];
+      const bar = $("postSearchFilters");
+      if (state.resultItems.length) {
+        bar.classList.remove("hidden");
+        resetPostFilters();
+      } else {
+        bar.classList.add("hidden");
+        $("postFilterStatus").textContent = "";
+        renderResults([]);
+      }
+    }
+
     function renderResults(items) {
       const root = $("results");
       root.innerHTML = "";
@@ -1049,7 +1166,7 @@ export function renderDashboardPage(storeDomain: string): string {
         const wiped = (data.totalParsed > 0 && items.length === 0);
         $("filterActions").classList.toggle("hidden", !wiped && !data.warning);
 
-        renderResults(items);
+        setSearchResults(items);
         if (wiped) {
           toast("الفلاتر استبعدت كل النتائج — جرّب العرض بدون فلتر محلي", true);
         } else if (!items.length) {
@@ -1069,11 +1186,23 @@ export function renderDashboardPage(storeDomain: string): string {
     $("showRawBtn").onclick = () => {
       const raw = (state.lastSearch && state.lastSearch.resultsBeforeFilter) || [];
       if (!raw.length) return toast("لا توجد نتائج خام", true);
-      renderResults(raw);
+      setSearchResults(raw);
       $("searchStatus").textContent =
         "عرض " + raw.length + " نتيجة بدون فلتر محلي (يمكنك الرفع مباشرة)";
       toast("تم عرض النتائج قبل الفلتر المحلي");
     };
+
+    ["postSort", "postShipping"].forEach((id) => {
+      $(id).addEventListener("change", () => {
+        if ((state.resultItems || []).length) applyPostFilters();
+      });
+    });
+    ["postChoiceOnly", "postHighRated"].forEach((id) => {
+      $(id).addEventListener("change", () => {
+        if ((state.resultItems || []).length) applyPostFilters();
+      });
+    });
+    $("postFilterReset").onclick = resetPostFilters;
 
     $("clearLocalFiltersBtn").onclick = () => {
       ["minSold","maxSold","minRating","minReviews","maxNegativeRate","minDiscountPercent","targetSellingPrice","minMarginPercent","includeKeywords","excludeKeywords"].forEach((id) => {
