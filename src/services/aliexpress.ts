@@ -179,7 +179,38 @@ export class AliExpressService {
       if (pageItems.length < 8) break;
     }
 
-    const parsed = [...parsedById.values()];
+    let parsed = [...parsedById.values()];
+
+    // Retry English wholesale host when Arabic locale returns empty (Worker / regional blocks)
+    if (parsed.length === 0 && locale === "ar") {
+      const enNormalized: ProductSearchFilters = {
+        ...normalized,
+        locale: "en",
+        page: 1,
+      };
+      const enCookie = this.buildLocaleCookie(
+        enNormalized.currency!,
+        enNormalized.shipToCountry!,
+        "en",
+      );
+      try {
+        const enUrl = this.buildSearchUrl(enNormalized, { minimal: true });
+        const enHtml = await this.fetchSearchHtml(enUrl, enCookie, "en");
+        if (enHtml && !this.isBlockedPage(enHtml)) {
+          const enItems = this.parseSearchResults(enHtml);
+          for (const item of enItems) {
+            if (!parsedById.has(item.aliexpressId)) {
+              parsedById.set(item.aliexpressId, item);
+            }
+          }
+          parsed = [...parsedById.values()];
+          if (parsed.length > 0) usedFallbackUrl = true;
+        }
+      } catch {
+        // keep empty
+      }
+    }
+
     const results = this.applyClientFilters(parsed, normalized);
 
     let warning: string | undefined;
@@ -383,10 +414,12 @@ export class AliExpressService {
   }
 
   private isBlockedPage(html: string): boolean {
+    const short = html.length < 8_000;
     return (
       html.includes("_____tmd_____/punish") ||
       html.includes("x5secdata") ||
-      (html.length < 4_000 && html.includes("sessionStorage.x5referer"))
+      (short && html.includes("sessionStorage.x5referer")) ||
+      (short && /captcha|verify you are human|access denied/i.test(html))
     );
   }
 
