@@ -329,7 +329,7 @@ export function renderDashboardPage(storeDomain: string): string {
           <div style="display:flex;flex-wrap:wrap;gap:.6rem;align-items:center;justify-content:space-between">
             <div>
               <strong style="font-size:1.05rem">⚡ اكتشاف تلقائي مبهر</strong>
-              <p>Workers AI يولّد 15 كلمة ترندي لأي فئة تلقائيًا، يبحث فيها، ويعرض فقط score 75+</p>
+              <p>Workers AI يولّد 15 كلمة لأي فئة، يبحث في 2 صفحة لكل كلمة، ويعرض الأقوى (score 68+)</p>
             </div>
             <button class="btn btn-auto-discover" id="autoDiscoverBtn" type="button">ابدأ الاكتشاف (1–2 دقيقة)</button>
           </div>
@@ -351,7 +351,7 @@ export function renderDashboardPage(storeDomain: string): string {
           <button class="btn btn-accent" id="searchBtn" type="button">بحث</button>
         </div>
         <div id="presetTip" class="hidden"></div>
-        <p class="hint" id="aiStatusHint">⚡ اكتشاف تلقائي: AI يولّد الكلمات + بحث + فلترة 75+ — أي فئة من الـ54</p>
+        <p class="hint" id="aiStatusHint">⚡ اكتشاف تلقائي: AI كلمات + فلترة ذكية — إن ما طلع مقبول اضغط «عرض المُتجاهَل»</p>
 
         <details class="more" id="advancedFilters">
           <summary>فلاتر متقدمة</summary>
@@ -457,8 +457,10 @@ export function renderDashboardPage(storeDomain: string): string {
             فتح رابط البحث على علي إكسبريس (مع الفلاتر)
           </a>
         </div>
-        <div id="filterActions" class="hidden" style="margin:.5rem 0">
+        <div id="filterActions" class="hidden" style="margin:.5rem 0;display:flex;gap:.5rem;flex-wrap:wrap">
           <button class="btn btn-ghost" id="showRawBtn" type="button">عرض النتائج بدون فلتر محلي</button>
+          <button class="btn btn-ghost hidden" id="showRejectedDiscoverBtn" type="button">عرض المُتجاهَل</button>
+          <button class="btn btn-ghost hidden" id="showApprovedDiscoverBtn" type="button">عرض المقبول فقط</button>
           <button class="btn btn-ghost" id="clearLocalFiltersBtn" type="button">مسح الفلاتر المحلية القاسية</button>
         </div>
         <div id="postSearchFilters" class="post-filters hidden">
@@ -621,7 +623,16 @@ export function renderDashboardPage(storeDomain: string): string {
 
   <script>
     const PRESETS = ${presetsJson};
-    const state = { listing: null, lastSearch: null, addPreview: null, lastPreset: null, lastAiAnalysis: null, resultItems: [] };
+    const state = {
+      listing: null,
+      lastSearch: null,
+      addPreview: null,
+      lastPreset: null,
+      lastAiAnalysis: null,
+      resultItems: [],
+      discoverApproved: [],
+      discoverRejected: [],
+    };
 
     const $ = (id) => document.getElementById(id);
     const toast = (msg, err=false) => {
@@ -1074,6 +1085,25 @@ export function renderDashboardPage(storeDomain: string): string {
       return Number(item.discoveryScore) || 0;
     }
 
+    function updateDiscoverActionButtons() {
+      const rejected = state.discoverRejected || [];
+      const approved = state.discoverApproved || [];
+      const rejBtn = $("showRejectedDiscoverBtn");
+      const appBtn = $("showApprovedDiscoverBtn");
+      if (rejected.length) {
+        rejBtn.classList.remove("hidden");
+        rejBtn.textContent = "عرض المُتجاهَل (" + rejected.length + ")";
+      } else {
+        rejBtn.classList.add("hidden");
+      }
+      if (approved.length && (state.resultItems || []).some((i) => i.discoverRejected)) {
+        appBtn.classList.remove("hidden");
+      } else {
+        appBtn.classList.add("hidden");
+      }
+      $("filterActions").classList.toggle("hidden", !rejected.length && !state.lastSearch?.resultsBeforeFilter);
+    }
+
     async function runAutoDiscover() {
       const category = $("category").value;
       if (!category) {
@@ -1097,7 +1127,7 @@ export function renderDashboardPage(storeDomain: string): string {
             shipToCountry: $("shipToCountry").value,
             currency: $("currency").value,
             keywordLimit: 15,
-            minScore: 75,
+            minScore: 68,
             maxResults: 12,
           }),
         });
@@ -1106,21 +1136,31 @@ export function renderDashboardPage(storeDomain: string): string {
         state.lastPreset = "auto-discover";
         const items = data.results || [];
 
+        state.discoverApproved = items;
+        state.discoverRejected = data.rejectedResults || [];
+
+        const stats = data.scoreStats || {};
         $("searchStatus").textContent =
-          "اكتشاف مبهر: " + items.length + " منتج (score ≥ " + (data.minScoreUsed || 75) +
-          ") · " + (data.keywordSource === "workers-ai" ? "كلمات AI" : "كلمات احتياطية") +
-          " · فحصنا " + (data.keywordsScanned || 0) + " كلمات · " +
-          (data.totalUnique || 0) + " منتج فريد · " +
+          "اكتشاف: " + items.length + " مقبول (≥ " + (data.minScoreUsed || 68) +
+          ") · مُتجاهَل " + (state.discoverRejected.length || 0) +
+          " · أعلى score " + (stats.maxScore || "—") +
+          " · متوسط " + (stats.medianScore || "—") +
+          " · " + (data.keywordSource === "workers-ai" ? "كلمات AI" : "كلمات احتياطية") +
+          " · " + (data.keywordsScanned || 0) + " كلمات · " +
+          (data.totalUnique || 0) + " فريد · " +
           (data.executionTimeSeconds || 0) + " ثانية" +
           (data.warning ? (" — " + data.warning) : "");
 
         $("searchUrlRow").classList.add("hidden");
         setSearchResults(items);
+        updateDiscoverActionButtons();
 
-        if (!items.length) {
-          toast(data.warning || "ما لقينا منتجات مبهرة — جرّب فئة أخرى", true);
+        if (!items.length && state.discoverRejected.length) {
+          toast("لا مقبول — اضغط «عرض المُتجاهَل» لترى أفضل ما تم رفضه", true);
+        } else if (!items.length) {
+          toast(data.warning || "لا نتائج", true);
         } else {
-          toast("⚡ " + items.length + " منتج مبهر جاهز للمراجعة");
+          toast("⚡ " + items.length + " منتج مقبول");
         }
       } catch (e) {
         $("searchStatus").textContent = "";
@@ -1212,6 +1252,9 @@ export function renderDashboardPage(storeDomain: string): string {
         ).join("");
         const detailLines = buildProductDetailLines(item);
         const flags = [];
+        if (item.discoverRejectReason) {
+          flags.push('<span class="badge" style="background:#fee4e2;color:#b42318">⛔ ' + escapeHtml(item.discoverRejectReason) + "</span>");
+        }
         if (item.discoverFinalScore != null) {
           flags.push('<span class="badge" style="background:#10231f;color:#e8ff57">⭐ ' + escapeHtml(String(item.discoverFinalScore)) + "</span>");
         } else if (item.discoveryScore != null) {
@@ -1311,6 +1354,22 @@ export function renderDashboardPage(storeDomain: string): string {
     $("searchBtn").onclick = runSearch;
     $("autoDiscoverBtn").onclick = runAutoDiscover;
     $("query").addEventListener("keydown", (e) => { if (e.key === "Enter") runSearch(); });
+
+    $("showRejectedDiscoverBtn").onclick = () => {
+      const rejected = state.discoverRejected || [];
+      if (!rejected.length) return toast("لا توجد نتائج مُتجاهَلة", true);
+      setSearchResults(rejected);
+      $("searchStatus").textContent =
+        "عرض " + rejected.length + " منتج مُتجاهَل (أعلى score أولًا) — راجع سبب الرفض على كل كارت";
+      toast("المُتجاهَل: " + rejected.length + " منتج");
+    };
+
+    $("showApprovedDiscoverBtn").onclick = () => {
+      const approved = state.discoverApproved || [];
+      if (!approved.length) return toast("لا مقبول", true);
+      setSearchResults(approved);
+      $("searchStatus").textContent = "عرض " + approved.length + " منتج مقبول فقط";
+    };
 
     $("showRawBtn").onclick = () => {
       const raw = (state.lastSearch && state.lastSearch.resultsBeforeFilter) || [];

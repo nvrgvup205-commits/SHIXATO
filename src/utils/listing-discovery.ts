@@ -55,12 +55,34 @@ export function isSuspiciousMetrics(listing: ListingQualityInput): boolean {
   return false;
 }
 
+const ARABIC_GENERIC_RE =
+  /(ملصق|عشوائي|جملة|بالجملة|مختلط|تلوين|كتاب تلوين|نسخة|تقليد)/u;
+
+const ARABIC_PROBLEM_RE =
+  /(منظم|تنظيم|ذكي|مبتكر|حامل|حل|مساعد|سهل|سريع|متعدد|وظائف|محمول|عملي|مريح|تخزين|ترتيب|مقاوم|قابل للشحن|شاحن|لاسلكي)/u;
+
+export function heuristicTitleHaystack(
+  title: string,
+  titleEn?: string,
+  extra?: string,
+): string {
+  return `${titleEn?.trim() || ""} ${title.trim()} ${extra?.trim() || ""}`.trim();
+}
+
+export function isGenericTitleInHaystack(haystack: string): boolean {
+  return GENERIC_TITLE_RE.test(haystack) || ARABIC_GENERIC_RE.test(haystack);
+}
+
+export function isProblemSolvingInHaystack(haystack: string): boolean {
+  return PROBLEM_SOLVING_RE.test(haystack) || ARABIC_PROBLEM_RE.test(haystack);
+}
+
 export function isGenericTitle(title: string): boolean {
-  return GENERIC_TITLE_RE.test(title);
+  return isGenericTitleInHaystack(title);
 }
 
 export function isProblemSolvingTitle(title: string): boolean {
-  return PROBLEM_SOLVING_RE.test(title);
+  return isProblemSolvingInHaystack(title);
 }
 
 export function isTrendyTitle(title: string, badges?: string[]): boolean {
