@@ -578,7 +578,7 @@ export function renderDashboardPage(storeDomain: string): string {
           <button class="btn btn-primary" id="aeSaveTokenBtn" type="button">حفظ التوكن</button>
         </div>
         <p class="hint" style="margin-top:.75rem">
-          روابط مفيدة:
+          <a href="/api/auth/aliexpress/setup" target="_blank" rel="noopener">صفحة إعداد OAuth (انسخ Callback URL)</a> ·
           <a href="https://openservice.aliexpress.com/app/list" target="_blank" rel="noopener">تطبيقات AliExpress</a> ·
           <a href="https://openservice.aliexpress.com/doc/doc.htm" target="_blank" rel="noopener">التوثيق</a> ·
           <a href="https://ds.aliexpress.com/" target="_blank" rel="noopener">DS Center</a>

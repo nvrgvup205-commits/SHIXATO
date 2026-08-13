@@ -22,6 +22,42 @@ const aliexpressAuth = new Hono<{ Bindings: Env }>();
 
 aliexpressAuth.use("/aliexpress/*", requireHttps());
 
+/** صفحة إعداد — اعرض القيم الدقيقة لنسخها في AliExpress Console */
+aliexpressAuth.get("/aliexpress/setup", async (c) => {
+  const status = await getAliExpressCredentialStatus(c.env);
+  const creds = status.configured ? await loadAliExpressCredentials(c.env) : null;
+  const callbackUrl = resolveAliExpressCallbackUrl(c.env);
+  const appKey = creds?.appKey ?? c.env.ALIEXPRESS_APP_KEY ?? "—";
+
+  return c.html(`<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><title>إعداد AliExpress OAuth</title></head>
+<body style="font-family:sans-serif;padding:2rem;max-width:760px;line-height:1.7">
+  <h1>إعداد Callback URL — SHIXATO</h1>
+  <p>الخطأ <strong>Redirect uri does not match</strong> يعني أن الرابط في AliExpress Console <em>مختلف حرفياً</em> عن اللي السيرفر بيبعته.</p>
+
+  <h2>انسخ هذا الرابط بالضبط في AliExpress Console → App Settings → Callback URL:</h2>
+  <pre id="cb" style="background:#f4f4f4;padding:1rem;overflow:auto;direction:ltr;text-align:left;font-size:15px;border:2px solid #0f8a6a;border-radius:8px">${callbackUrl}</pre>
+  <button onclick="navigator.clipboard.writeText(document.getElementById('cb').textContent);this.textContent='تم النسخ ✅'" style="padding:.5rem 1rem;cursor:pointer">نسخ Callback URL</button>
+
+  <h2>App Key (يجب أن يطابق)</h2>
+  <pre style="background:#f4f4f4;padding:.75rem;direction:ltr">${appKey}</pre>
+
+  <h2>تحقق من هذه النقاط</h2>
+  <ul>
+    <li>✅ يبدأ بـ <code>https://</code> (مش http)</li>
+    <li>✅ بدون <code>/</code> في الآخر</li>
+    <li>✅ المسار: <code>/api/aliexpress/callback</code> (مش <code>/api/auth/aliexpress/callback</code>)</li>
+    <li>✅ النطاق: <code>shixato.nvrgvup205.workers.dev</code> (بحرف v — مش nvrgyup)</li>
+    <li>✅ App Key في Console = App Key في Cloudflare</li>
+  </ul>
+
+  <p>بعد الحفظ في AliExpress انتظر 2–5 دقائق ثم جرّب:</p>
+  <p><a href="/api/auth/aliexpress/connect" style="font-size:18px">← اضغط هنا لربط OAuth</a></p>
+  <p><a href="/dashboard">العودة للداشبورد</a></p>
+  <hr>
+  <p style="color:#666;font-size:13px">تشخيص: configured=${status.configured}, envKey=${status.hasEnvAppKey}, envSecret=${status.hasEnvAppSecret}</p>
+</body></html>`);
+});
+
 /** بدء OAuth — إعادة توجيه المستخدم لصفحة تسجيل دخول AliExpress */
 aliexpressAuth.get("/aliexpress/connect", async (c) => {
   const configured = await hasAliExpressAppCredentials(c.env);
