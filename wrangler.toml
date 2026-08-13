@@ -33,6 +33,9 @@ DASHBOARD_PIN = "1111"
 DEFAULT_MARKUP = "1.4"
 # Max images to push to Shopify per product
 MAX_PRODUCT_IMAGES = "8"
+# AliExpress Open Platform (AppKey is public; AppSecret stays in Secrets/Supabase)
+ALIEXPRESS_APP_KEY = "542818"
+ALIEXPRESS_CALLBACK_URL = "https://shixato.nvrgvup205.workers.dev/api/auth/aliexpress/callback"
 
 # Workers AI — product analysis in dashboard (enable in Cloudflare dashboard)
 [ai]
