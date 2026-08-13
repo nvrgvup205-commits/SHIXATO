@@ -279,7 +279,7 @@ aliexpressAuth.post("/aliexpress/exchange-code", requireAuth, async (c) => {
             ? "الكود صالح لمرة واحدة — اضغط «ربط OAuth» من جديد واحصل على code جديد"
             : "تأكد أنك لصقت code وليس access_token",
       },
-      err instanceof HttpError ? err.status : 502,
+      502 as const,
     );
   }
 });

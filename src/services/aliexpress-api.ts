@@ -52,6 +52,7 @@ export type AliExpressSearchProduct = {
   product_id: string;
   title: string;
   price: number;
+  currency?: string;
   sales?: number;
   rating?: number;
   reviews?: number;
@@ -170,7 +171,10 @@ export class AliExpressApi {
     if (q.length < 2) return [];
 
     const fromKeyword = await this.searchProductsByKeyword(q, pageNumber).catch(
-      () => [] as AliExpressSearchProduct[],
+      (err) => {
+        console.warn("aliexpress.ds.product.search failed", err);
+        return [] as AliExpressSearchProduct[];
+      },
     );
     if (fromKeyword.length > 0) return fromKeyword;
 
@@ -427,14 +431,15 @@ export class AliExpressApi {
 
   async createTokenFromCode(code: string): Promise<AliExpressTokenResponse> {
     const trimmed = code.trim();
-    const paths = [
+    const paths: Array<{ path: string; extra: Record<string, string> }> = [
       { path: "/auth/token/security/create", extra: { uuid: crypto.randomUUID() } },
       { path: "/auth/token/create", extra: {} },
     ];
     let lastError: unknown;
     for (const { path, extra } of paths) {
       try {
-        return await this.callRest(path, { code: trimmed, ...extra });
+        const params: Record<string, string> = { code: trimmed, ...extra };
+        return await this.callRest(path, params);
       } catch (err) {
         lastError = err;
         if (!(err instanceof HttpError) || err.status !== 502) throw err;
