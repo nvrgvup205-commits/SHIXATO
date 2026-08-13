@@ -19,7 +19,6 @@ import { resolveArabicDescriptionHtml } from "../utils/arabic-product";
 import {
   enrichListingQuality,
   isSuspiciousMetrics,
-  passesDiscoveryGate,
 } from "../utils/listing-discovery";
 import { computeWowHeuristic } from "./wow-scoring";
 
@@ -1098,44 +1097,12 @@ export class AliExpressService {
             score: this.scoreListing(enriched, filters),
           };
         })
-        .filter(({ item }) => {
-          if (!discoveryOn) return true;
-          return passesDiscoveryGate(
-            {
-              trustScore: item.trustScore ?? 0,
-              uniquenessScore: item.uniquenessScore ?? 0,
-              discoveryScore: item.discoveryScore ?? 0,
-              suspiciousMetrics: Boolean(item.suspiciousMetrics),
-              launchYear: item.launchYear,
-              isCurrentYear: Boolean(item.isCurrentYear),
-              genericTitle: Boolean(item.genericTitle),
-              problemSolvingTitle: Boolean(item.problemSolvingTitle),
-            },
-            filters.presetGrade,
-          );
-        })
         .sort((a, b) => b.score - a.score);
 
-      const minScore =
-        filters.presetGrade === "pro"
-          ? 62
-          : filters.presetGrade === "balanced"
-            ? 52
-            : filters.presetGrade === "starter"
-              ? 42
-              : discoveryOn
-                ? 48
-                : 45;
-
-      let results = scored
-        .filter((s) => s.score >= minScore)
+      // Rank all — do not exclude by discovery gate; user filters manually
+      return scored
+        .slice(0, 120)
         .map((s) => s.item);
-
-      if (results.length < 12) {
-        results = scored.slice(0, Math.min(48, scored.length)).map((s) => s.item);
-      }
-
-      return results;
     }
 
     const include = this.splitKeywords(filters.includeKeywords);

@@ -3,10 +3,9 @@ import type { ProductSearchFilters } from "../types";
 
 export type DropshipGrade = "starter" | "balanced" | "pro";
 
-const CURRENT_YEAR = new Date().getUTCFullYear();
-
+/** Hard-ban only obvious junk — user filters impressive vs not manually */
 export const DISCOVERY_EXCLUDES =
-  "replica,fake,counterfeit,sticker,stickers,coloring book,random style,assorted,wholesale,bulk lot,mixed styles,generic";
+  "replica,fake,counterfeit,wholesale,bulk lot,mixed styles";
 
 export interface DropshipPreset {
   id: DropshipGrade;
@@ -14,35 +13,34 @@ export interface DropshipPreset {
   emoji: string;
   descAr: string;
   tipAr: string;
-  /** Scoring hints — applied in soft mode, not as hard URL filters */
+  /** Scoring hints — rank only, never hard-exclude in soft mode */
   filters: Omit<ProductSearchFilters, "query" | "category" | "page">;
 }
 
 /**
- * Grade presets tune discovery/trust filters.
- * Search scope comes from the dashboard category picker.
+ * Grade presets tune ranking (not exclusion).
+ * All results shown — user filters impressive vs not in the dashboard.
  */
 export const DROPSHIP_PRESETS: DropshipPreset[] = [
   {
     id: "starter",
     emoji: "🥉",
     labelAr: "مبتدئ",
-    descAr: "اكتشاف داخل الفئة — يفضّل منتجات صادقة وحلّ مشاكل",
-    tipAr: "اختر الفئة أولًا. نتائج أقل لكن أصدق من البحث العشوائي.",
+    descAr: "أقصى نتائج — ترتيب حسب الإبهار مع فلتر خفيف",
+    tipAr: "اختر الفئة أولًا. كل النتائج تظهر — فلتر المبهر بعدين.",
     filters: {
-      sort: "newest",
+      sort: "orders",
       locale: "ar",
       filterMode: "soft",
       discoveryMode: true,
-      minLaunchYear: CURRENT_YEAR,
       applyUrlFilters: false,
-      fetchPages: 2,
+      fetchPages: 4,
       currency: "USD",
       shipToCountry: "SA",
-      minSold: 80,
-      minRating: 4.2,
-      minReviews: 15,
-      maxNegativeRate: 28,
+      minSold: 30,
+      minRating: 4.0,
+      minReviews: 5,
+      maxNegativeRate: 35,
       excludeKeywords: DISCOVERY_EXCLUDES,
     },
   },
@@ -50,25 +48,24 @@ export const DROPSHIP_PRESETS: DropshipPreset[] = [
     id: "balanced",
     emoji: "🥈",
     labelAr: "متوسط",
-    descAr: "توازن — منتجات تميّز + مصداقية + سنة حالية",
-    tipAr: "الأفضل يوميًا: فئة واضحة + 🥈. ركّز على حل مشكلة حقيقية.",
+    descAr: "توازن — نتائج كثيرة مرتّبة حسب الجودة والإبهار",
+    tipAr: "الأفضل يوميًا: فئة + 🥈. كل النتائج تظهر — رتّب يدويًا.",
     filters: {
-      sort: "newest",
+      sort: "orders",
       locale: "ar",
       filterMode: "soft",
       discoveryMode: true,
-      minLaunchYear: CURRENT_YEAR,
       applyUrlFilters: false,
-      fetchPages: 2,
+      fetchPages: 5,
       currency: "USD",
       shipToCountry: "SA",
-      minSold: 200,
-      minRating: 4.4,
-      minReviews: 25,
-      maxNegativeRate: 22,
-      minDiscountPercent: 8,
+      minSold: 80,
+      minRating: 4.2,
+      minReviews: 10,
+      maxNegativeRate: 30,
+      minDiscountPercent: 5,
       targetSellingPrice: 79,
-      minMarginPercent: 30,
+      minMarginPercent: 20,
       excludeKeywords: DISCOVERY_EXCLUDES + ",used,broken",
     },
   },
@@ -76,25 +73,24 @@ export const DROPSHIP_PRESETS: DropshipPreset[] = [
     id: "pro",
     emoji: "🥇",
     labelAr: "محترف",
-    descAr: "أقوى فلتر — تميّز عالي + أرقام منطقية + 2026",
-    tipAr: "نتائج أقل لكن «رهيبة». مثالي قبل إنفاق ميزانية إعلانات.",
+    descAr: "أعمق سكراب — 6 صفحات + ترتيب أقوى (كل النتائج تظهر)",
+    tipAr: "أقوى سكراب — نتائج أكثر. فلتر المبهر يدويًا بعد العرض.",
     filters: {
-      sort: "newest",
+      sort: "orders",
       locale: "ar",
       filterMode: "soft",
       discoveryMode: true,
-      minLaunchYear: CURRENT_YEAR,
       applyUrlFilters: false,
-      fetchPages: 3,
+      fetchPages: 6,
       currency: "USD",
       shipToCountry: "SA",
-      minSold: 300,
-      minRating: 4.5,
-      minReviews: 40,
-      maxNegativeRate: 18,
-      minDiscountPercent: 12,
+      minSold: 150,
+      minRating: 4.3,
+      minReviews: 20,
+      maxNegativeRate: 25,
+      minDiscountPercent: 8,
       targetSellingPrice: 99,
-      minMarginPercent: 35,
+      minMarginPercent: 25,
       excludeKeywords: DISCOVERY_EXCLUDES + ",used,broken,random",
     },
   },
@@ -130,13 +126,13 @@ export function buildPresetSearch(
     presetGrade: grade,
     filterMode: "soft",
     discoveryMode: true,
-    minLaunchYear: CURRENT_YEAR,
     applyUrlFilters: false,
   };
 }
 
+/** Minimum score for ranking boost — not hard exclusion */
 export function presetMinScore(grade: DropshipGrade): number {
-  if (grade === "pro") return 62;
-  if (grade === "balanced") return 52;
-  return 42;
+  if (grade === "pro") return 35;
+  if (grade === "balanced") return 28;
+  return 20;
 }
