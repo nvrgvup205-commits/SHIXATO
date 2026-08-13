@@ -14,5 +14,9 @@ interface Env {
   OPENAI_API_KEY?: string;
   OPENAI_BASE_URL?: string;
   OPENAI_MODEL?: string;
+  ALIEXPRESS_APP_KEY?: string;
+  ALIEXPRESS_APP_SECRET?: string;
+  ALIEXPRESS_ACCESS_TOKEN?: string;
+  ALIEXPRESS_CALLBACK_URL?: string;
   AI?: Ai;
 }

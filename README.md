@@ -84,7 +84,18 @@ npx wrangler secret put SUPABASE_SERVICE_ROLE_KEY
 npx wrangler secret put API_KEY
 # optional:
 npx wrangler secret put OPENAI_API_KEY
+# AliExpress Open Platform (after app approval on console.aliexpress.com):
+npx wrangler secret put ALIEXPRESS_APP_KEY
+npx wrangler secret put ALIEXPRESS_APP_SECRET
 ```
+
+After deploy, connect AliExpress once in the browser:
+
+```
+https://<your-worker>/api/auth/aliexpress/connect
+```
+
+This stores the access token in Supabase `shixato.app_settings`.
 
 `SHOPIFY_STORE_DOMAIN` is a non-secret `[vars]` value in `wrangler.toml`.
 Worker name in config is `shixato` (must match the Cloudflare project name).
