@@ -84,18 +84,32 @@ npx wrangler secret put SUPABASE_SERVICE_ROLE_KEY
 npx wrangler secret put API_KEY
 # optional:
 npx wrangler secret put OPENAI_API_KEY
-# AliExpress Open Platform (after app approval on console.aliexpress.com):
-npx wrangler secret put ALIEXPRESS_APP_KEY
+# AliExpress Open Platform (Shixato app — AppKey 542818 in wrangler.toml [vars]):
 npx wrangler secret put ALIEXPRESS_APP_SECRET
+# optional after OAuth:
+npx wrangler secret put ALIEXPRESS_ACCESS_TOKEN
 ```
+
+**Cloudflare Variables (Text, not Secret):**
+
+| Name | Value |
+|------|-------|
+| `ALIEXPRESS_APP_KEY` | `542818` (also in `wrangler.toml`) |
+| `ALIEXPRESS_CALLBACK_URL` | `https://shixato.nvrgvup205.workers.dev/api/aliexpress/callback` |
+
+**Cloudflare Secret:**
+
+| Name | Value |
+|------|-------|
+| `ALIEXPRESS_APP_SECRET` | from AliExpress Console → App Secret |
 
 After deploy, connect AliExpress once in the browser:
 
 ```
-https://<your-worker>/api/auth/aliexpress/connect
+https://shixato.nvrgvup205.workers.dev/api/auth/aliexpress/connect
 ```
 
-This stores the access token in Supabase `shixato.app_settings`.
+This stores the access token in Supabase `shixato.aliexpress_tokens`.
 
 `SHOPIFY_STORE_DOMAIN` is a non-secret `[vars]` value in `wrangler.toml`.
 Worker name in config is `shixato` (must match the Cloudflare project name).
