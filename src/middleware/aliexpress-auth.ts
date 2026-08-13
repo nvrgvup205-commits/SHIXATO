@@ -95,8 +95,8 @@ export function requireAliExpressToken(): MiddlewareHandler<AliExpressAuthEnv> {
         401,
       );
     } else {
-      const valid = await oauth.validateToken(accessToken, { expiresAt });
-      if (!valid && refreshToken) {
+      const check = await oauth.validateToken(accessToken, { expiresAt });
+      if (!check.valid && refreshToken) {
         try {
           const refreshed = await oauth.refreshAccessToken(refreshToken);
           accessToken = refreshed.accessToken;
@@ -113,7 +113,7 @@ export function requireAliExpressToken(): MiddlewareHandler<AliExpressAuthEnv> {
             401,
           );
         }
-      } else if (!valid) {
+      } else if (!check.valid) {
         return c.json(
           {
             ok: false,

@@ -571,6 +571,7 @@ export function renderDashboardPage(storeDomain: string): string {
         <div style="display:flex;gap:.55rem;flex-wrap:wrap;margin:.75rem 0">
           <a class="btn btn-accent" id="aeConnectBtn" href="/api/auth/aliexpress/connect" target="_blank" rel="noopener" style="text-decoration:none">ربط OAuth (محاولة)</a>
           <button class="btn btn-ghost" id="aeRefreshStatusBtn" type="button">تحديث الحالة</button>
+          <button class="btn btn-ghost" id="aeTestApiBtn" type="button">اختبار API</button>
         </div>
         <label for="aeAccessToken">أو الصق Access Token يدوياً (من API Testing Tool)</label>
         <textarea id="aeAccessToken" rows="3" placeholder="الصق access_token هنا…" style="width:100%;margin-top:.35rem;font-family:monospace;font-size:.85rem"></textarea>
@@ -1470,6 +1471,19 @@ export function renderDashboardPage(storeDomain: string): string {
     }
 
     $("aeRefreshStatusBtn").onclick = loadAliExpressStatus;
+    $("aeTestApiBtn").onclick = async () => {
+      try {
+        const res = await api("/api/auth/aliexpress/test");
+        if (res.data && res.data.valid) {
+          toast("✅ API يعمل — التوكن صالح");
+        } else {
+          toast("❌ " + (res.data?.error || "التوكن غير صالح"), true);
+        }
+        loadAliExpressStatus();
+      } catch (e) {
+        toast(e.message || "فشل الاختبار", true);
+      }
+    };
     $("aeSaveTokenBtn").onclick = async () => {
       const token = ($("aeAccessToken").value || "").trim();
       if (!token) return toast("الصق access token أولاً", true);
@@ -1480,6 +1494,9 @@ export function renderDashboardPage(storeDomain: string): string {
         });
         $("aeAccessToken").value = "";
         toast((res.data && res.data.message_ar) || "تم حفظ التوكن");
+        if (res.data && !res.data.valid && res.data.error) {
+          setTimeout(() => toast("تفاصيل: " + res.data.error, true), 400);
+        }
         loadAliExpressStatus();
       } catch (e) {
         toast(e.message || "فشل حفظ التوكن", true);

@@ -178,25 +178,55 @@ aliexpressAuth.post("/aliexpress/token", requireAuth, async (c) => {
     callbackUrl: creds.callbackUrl,
   });
 
-  const valid = await oauth.validateToken(accessToken, { expiresAt });
+  const check = await oauth.validateToken(accessToken, { expiresAt });
 
   await auditOAuth(
     c.env,
     "aliexpress_oauth:manual_token",
-    { has_refresh_token: Boolean(body.refreshToken), valid },
-    valid ? "success" : "partial",
-    valid ? undefined : "Token saved but validation call failed",
+    { has_refresh_token: Boolean(body.refreshToken), valid: check.valid },
+    check.valid ? "success" : "partial",
+    check.valid ? undefined : check.error ?? "Token saved but validation call failed",
   );
 
   return c.json({
     ok: true,
     data: {
       saved: true,
-      valid,
+      valid: check.valid,
       expiresAt,
-      message_ar: valid
-        ? "تم حفظ التوكن — APIs الرسمية جاهزة"
-        : "تم الحفظ لكن التحقق فشل — تأكد أن التوكن صالح",
+      error: check.error ?? null,
+      message_ar: check.valid
+        ? "تم حفظ التوكن — APIs الرسمية جاهزة ✅"
+        : `تم الحفظ لكن التحقق فشل: ${check.error ?? "تأكد أنك لصقت access_token وليس code"}`,
+    },
+  });
+});
+
+/** اختبار التوكن المحفوظ — يُرجع رسالة الخطأ الحقيقية من AliExpress */
+aliexpressAuth.get("/aliexpress/test", requireAuth, async (c) => {
+  const creds = await loadAliExpressCredentials(c.env);
+  if (!creds?.accessToken) {
+    return c.json({ ok: false, error: "لا يوجد token محفوظ" }, 401);
+  }
+
+  const oauth = new AliExpressOAuth({
+    appKey: creds.appKey,
+    appSecret: creds.appSecret,
+    callbackUrl: creds.callbackUrl,
+  });
+
+  const check = await oauth.validateToken(creds.accessToken, {
+    expiresAt: creds.tokenExpiresAt,
+  });
+
+  return c.json({
+    ok: check.valid,
+    data: {
+      valid: check.valid,
+      error: check.error ?? null,
+      appKey: creds.appKey,
+      tokenPreview: creds.accessToken.slice(0, 8) + "…",
+      expiresAt: creds.tokenExpiresAt,
     },
   });
 });
