@@ -1525,6 +1525,10 @@ export function renderDashboardPage(storeDomain: string): string {
           (!keyOk ? " <span style='color:#ffb4a8'>❌ غير مطابق</span>" : " ✅") + "</div>" +
           "<div><strong>Token:</strong> " + (ok ? "موجود ✅" : "مفقود ❌") + "</div>" +
           (d.tokenExpiresAt ? "<div><strong>ينتهي:</strong> " + escapeHtml(d.tokenExpiresAt) + "</div>" : "") +
+          (d.secretLength ? "<div><strong>Secret:</strong> " + escapeHtml(d.secretSource || "—") +
+            " · طول " + d.secretLength + " حرف" +
+            (d.secretFingerprint ? " · بصمة <code>" + escapeHtml(d.secretFingerprint) + "</code>" : "") +
+            "</div>" : "") +
           "<div><strong>Callback:</strong> <code style='font-size:.8rem'>" + escapeHtml(d.callbackUrl || "") + "</code></div>";
       } catch (e) {
         hint.textContent = "تعذّر قراءة حالة AliExpress";
@@ -1542,8 +1546,11 @@ export function renderDashboardPage(storeDomain: string): string {
         const body = await res.json().catch(() => ({}));
         if (body.data && body.data.valid) {
           toast("✅ API يعمل — التوكن صالح");
+        } else if (body.data?.errorKind === "bad_app_secret" || /signature|platform standards/i.test(body.data?.error || "")) {
+          toast("❌ App Secret غلط — انسخه من AliExpress Console → Cloudflare Secret", true);
+          if (body.data?.hintAr) setTimeout(() => toast(body.data.hintAr, true), 500);
         } else {
-          toast("❌ " + (body.data?.error || body.error || "التوكن غير صالح"), true);
+          toast("❌ " + (body.data?.error || body.error || "التوكن غير صالح — اعمل OAuth من جديد"), true);
         }
         loadAliExpressStatus();
       } catch (e) {

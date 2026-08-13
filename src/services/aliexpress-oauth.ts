@@ -90,6 +90,29 @@ export class AliExpressOAuth {
   }
 
   /**
+   * يتحقق أن AppKey + AppSecret يولّدان توقيعاً مقبولاً (بدون access token).
+   */
+  async probeAppSecret(): Promise<{ signatureOk: boolean; error?: string }> {
+    try {
+      await this.postSignedRest(ALIEXPRESS_OAUTH_TOKEN_CREATE_PATH, {
+        code: "shixato-signature-probe",
+      });
+      return { signatureOk: true };
+    } catch (err) {
+      const msg =
+        err instanceof HttpError
+          ? err.message
+          : err instanceof Error
+            ? err.message
+            : "فشل فحص التوقيع";
+      if (/signature|IncompleteSignature|platform standards/i.test(msg)) {
+        return { signatureOk: false, error: msg };
+      }
+      return { signatureOk: true };
+    }
+  }
+
+  /**
    * 4) التحقق من صلاحية التوكن.
    * - يتحقق من الشكل والانتهاء المحلي
    * - يجرّب استدعاء API خفيف للتأكد أن AliExpress يقبل التوكن
