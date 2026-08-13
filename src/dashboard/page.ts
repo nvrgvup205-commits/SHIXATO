@@ -599,19 +599,41 @@ export function renderDashboardPage(storeDomain: string): string {
         <h3 style="margin:0 0 .5rem;font-family:var(--display)">ربط AliExpress API</h3>
         <p class="hint" id="aeStatusHint">جاري التحقق من حالة الربط…</p>
         <div id="aeStatusBox" class="hint" style="margin:.5rem 0;padding:.75rem;border:1px solid var(--line);border-radius:12px;background:rgba(255,255,255,.5)"></div>
+
+        <div style="margin:1rem 0;padding:.9rem 1rem;border:1px solid var(--line);border-radius:12px;background:rgba(15,138,106,.06)">
+          <p style="margin:0 0 .65rem;font-weight:600">كيف تحصل على التوكن — 3 خطوات بسيطة</p>
+          <ol style="margin:0;padding-right:1.25rem;line-height:1.8">
+            <li><strong>الأسهل:</strong> اضغط «ربط OAuth» وسجّل دخول AliExpress — السيرفر يحفظ التوكن تلقائياً ✅</li>
+            <li><strong>إذا ظهر خطأ:</strong> انسخ <code>code</code> من رابط المتصفح بعد الموافقة والصقه في الحقل أدناه (ليس access_token)</li>
+            <li><strong>متقدم (اختياري):</strong> الصق access_token يدوياً من API Testing Tool</li>
+          </ol>
+        </div>
+
         <div style="display:flex;gap:.55rem;flex-wrap:wrap;margin:.75rem 0">
-          <a class="btn btn-accent" id="aeConnectBtn" href="/api/auth/aliexpress/connect" target="_blank" rel="noopener" style="text-decoration:none">ربط OAuth (محاولة)</a>
+          <a class="btn btn-accent" id="aeConnectBtn" href="/api/auth/aliexpress/connect" target="_blank" rel="noopener" style="text-decoration:none">① ربط OAuth (موصى به)</a>
           <button class="btn btn-ghost" id="aeRefreshStatusBtn" type="button">تحديث الحالة</button>
           <button class="btn btn-ghost" id="aeTestApiBtn" type="button">اختبار API</button>
           <button class="btn btn-ghost" id="aeClearTokenBtn" type="button">مسح التوكن</button>
         </div>
-        <label for="aeAccessToken">أو الصق Access Token يدوياً (من API Testing Tool)</label>
-        <textarea id="aeAccessToken" rows="3" placeholder="الصق access_token هنا…" style="width:100%;margin-top:.35rem;font-family:monospace;font-size:.85rem"></textarea>
+
+        <label for="aeAuthCode">② أو الصق كود التفويض (code) — بعد الموافقة على التطبيق</label>
+        <textarea id="aeAuthCode" rows="2" placeholder="الصق code من الرابط: .../callback?code=XXXX أو الرابط كاملاً" style="width:100%;margin-top:.35rem;font-family:monospace;font-size:.85rem"></textarea>
         <div style="display:flex;gap:.55rem;flex-wrap:wrap;margin-top:.65rem">
-          <button class="btn btn-primary" id="aeSaveTokenBtn" type="button">حفظ التوكن</button>
+          <button class="btn btn-primary" id="aeExchangeCodeBtn" type="button">استبدال الكود واحفظ التوكن</button>
         </div>
+        <p class="hint" style="margin-top:.45rem">الكود صالح لمرة واحدة — إذا فشل، اضغط ربط OAuth من جديد.</p>
+
+        <details style="margin-top:1rem">
+          <summary style="cursor:pointer;font-weight:600">③ خيار متقدم: لصق access_token يدوياً</summary>
+          <label for="aeAccessToken" style="display:block;margin-top:.65rem">Access Token (من API Testing Tool)</label>
+          <textarea id="aeAccessToken" rows="3" placeholder="الصق access_token هنا فقط إذا عندك واحد جاهز…" style="width:100%;margin-top:.35rem;font-family:monospace;font-size:.85rem"></textarea>
+          <div style="display:flex;gap:.55rem;flex-wrap:wrap;margin-top:.65rem">
+            <button class="btn btn-ghost" id="aeSaveTokenBtn" type="button">حفظ التوكن يدوياً</button>
+          </div>
+        </details>
+
         <p class="hint" style="margin-top:.75rem">
-          <a href="/api/auth/aliexpress/setup" target="_blank" rel="noopener">صفحة إعداد OAuth (انسخ Callback URL)</a> ·
+          <a href="/api/auth/aliexpress/setup" target="_blank" rel="noopener">دليل الإعداد الكامل (خطوة بخطوة)</a> ·
           <a href="https://openservice.aliexpress.com/app/list" target="_blank" rel="noopener">تطبيقات AliExpress</a> ·
           <a href="https://openservice.aliexpress.com/doc/doc.htm" target="_blank" rel="noopener">التوثيق</a> ·
           <a href="https://ds.aliexpress.com/" target="_blank" rel="noopener">DS Center</a>
@@ -706,7 +728,11 @@ export function renderDashboardPage(storeDomain: string): string {
         ...options,
       });
       const body = await res.json().catch(() => ({}));
-      if (!res.ok || body.ok === false) throw new Error(body.error || ("HTTP " + res.status));
+      if (!res.ok || body.ok === false) {
+        const err = new Error(body.error || ("HTTP " + res.status));
+        if (body.hintAr) err.hintAr = body.hintAr;
+        throw err;
+      }
       return body;
     }
 
@@ -1579,7 +1605,7 @@ export function renderDashboardPage(storeDomain: string): string {
           : ok
             ? "✅ API الرسمي جاهز — الشحن والتفاصيل تُحمّل تلقائياً عند فتح المنتج"
             : d.configured
-              ? "⚠️ AppKey موجود — تحتاج Access Token (OAuth أو لصق يدوي)"
+              ? "⚠️ اضغط «ربط OAuth» — أو الصق code من رابط AliExpress بعد الموافقة"
               : "❌ أضف App Secret في Cloudflare Secrets أولاً";
         box.innerHTML =
           "<div><strong>AppKey:</strong> " + escapeHtml(String(d.appKey || "—")) +
@@ -1645,6 +1671,28 @@ export function renderDashboardPage(storeDomain: string): string {
         loadAliExpressStatus();
       } catch (e) {
         toast(e.message || "فشل حفظ التوكن", true);
+      }
+    };
+    $("aeExchangeCodeBtn").onclick = async () => {
+      const code = ($("aeAuthCode").value || "").trim();
+      if (!code) return toast("الصق كود التفويض (code) من رابط AliExpress", true);
+      $("aeExchangeCodeBtn").disabled = true;
+      try {
+        const res = await api("/api/auth/aliexpress/exchange-code", {
+          method: "POST",
+          body: JSON.stringify({ code }),
+        });
+        $("aeAuthCode").value = "";
+        toast((res.data && res.data.message_ar) || "تم استبدال الكود وحفظ التوكن ✅");
+        if (res.data && !res.data.valid && res.data.error) {
+          setTimeout(() => toast("تفاصيل: " + res.data.error, true), 400);
+        }
+        loadAliExpressStatus();
+      } catch (e) {
+        const hint = e.hintAr || e.message || "فشل استبدال الكود — جرّب OAuth من جديد";
+        toast(hint, true);
+      } finally {
+        $("aeExchangeCodeBtn").disabled = false;
       }
     };
 

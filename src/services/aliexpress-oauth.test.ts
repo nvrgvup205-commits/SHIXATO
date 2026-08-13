@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   AliExpressOAuth,
   ALIEXPRESS_OAUTH_AUTHORIZE_URL,
+  ALIEXPRESS_OAUTH_TOKEN_CREATE_PATH,
+  ALIEXPRESS_OAUTH_TOKEN_CREATE_LEGACY_PATH,
   resolveTokenExpiry,
   sanitizeAccessToken,
   unwrapAliExpressTokenPayload,
@@ -42,6 +44,11 @@ describe("AliExpressOAuth", () => {
 
     const fromString = resolveTokenExpiry({ expire_time: "2026-09-12 12:00:00" });
     expect(fromString).not.toBeNull();
+  });
+
+  it("uses security token paths as primary", () => {
+    expect(ALIEXPRESS_OAUTH_TOKEN_CREATE_PATH).toBe("/auth/token/security/create");
+    expect(ALIEXPRESS_OAUTH_TOKEN_CREATE_LEGACY_PATH).toBe("/auth/token/create");
   });
 
   it("unwraps gopResponseBody token payloads", () => {
