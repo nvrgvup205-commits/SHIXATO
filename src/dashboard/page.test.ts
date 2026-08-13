@@ -31,7 +31,7 @@ describe("renderDashboardPage", () => {
     expect(html).toContain('id="turboDiscover"');
     expect(html).toContain('id="turboChipKeywords"');
     expect(html).toContain("صفحات لكل كلمة");
-    expect(html).toContain("صفحة إجمالاً");
+    expect(html).toContain("متوازي");
   });
 
   it("includes AliExpress settings panel", () => {

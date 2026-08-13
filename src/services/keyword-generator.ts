@@ -26,12 +26,23 @@ export class KeywordGeneratorService {
       return { keywords: [], source: "generated", categoryId: id };
     }
 
-    const capped = Math.min(Math.max(limit, 10), 20);
+    const capped = Math.min(Math.max(limit, 6), 20);
+
+    // Curated power keywords — instant, no AI wait
+    const fromCurated = getTrendingKeywords(cat.id, capped);
+    if (fromCurated.length >= 6) {
+      return {
+        keywords: fromCurated.slice(0, capped),
+        source: "file",
+        categoryId: cat.id,
+        categoryLabelAr: cat.labelAr,
+      };
+    }
 
     if (this.env.AI) {
       try {
         const aiKeywords = await this.generateWithWorkersAi(cat.id, cat.labelAr, cat.query, capped);
-        if (aiKeywords.length >= 8) {
+        if (aiKeywords.length >= 6) {
           return {
             keywords: aiKeywords.slice(0, capped),
             source: "workers-ai",
@@ -44,18 +55,8 @@ export class KeywordGeneratorService {
       }
     }
 
-    const fromFile = getTrendingKeywords(cat.id, capped);
-    if (fromFile.length >= 8) {
-      return {
-        keywords: fromFile,
-        source: "file",
-        categoryId: cat.id,
-        categoryLabelAr: cat.labelAr,
-      };
-    }
-
     return {
-      keywords: fromFile,
+      keywords: fromCurated,
       source: "generated",
       categoryId: cat.id,
       categoryLabelAr: cat.labelAr,

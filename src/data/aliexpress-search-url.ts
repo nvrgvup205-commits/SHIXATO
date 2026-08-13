@@ -77,3 +77,25 @@ export function slugifyWholesaleQuery(query: string): string {
     .replace(/^-|-$/g, "");
   return slug || "product";
 }
+
+/**
+ * Legacy wholesale URL — reliable fallback when `/w/wholesale-{slug}` is blocked.
+ * Pattern: https://www.aliexpress.com/wholesale?SearchText={query}&SortType=...
+ */
+export function buildLegacyWholesaleUrl(input: {
+  query: string;
+  page?: number;
+  sort?: string;
+  locale?: "ar" | "en";
+}): string {
+  const locale = input.locale === "en" ? "en" : "ar";
+  const host =
+    locale === "ar" ? "https://ar.aliexpress.com" : "https://www.aliexpress.com";
+  const params = new URLSearchParams();
+  params.set("SearchText", input.query.trim());
+  if (input.sort) params.set("SortType", input.sort);
+  const page = input.page && input.page > 1 ? input.page : 1;
+  if (page > 1) params.set("page", String(page));
+  if (locale === "ar") params.set("lang", "ar");
+  return `${host}/wholesale?${params.toString()}`;
+}
