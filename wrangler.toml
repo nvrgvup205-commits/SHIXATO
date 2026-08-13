@@ -8,9 +8,11 @@
 #   npx wrangler secret put SUPABASE_SERVICE_ROLE_KEY
 #   npx wrangler secret put API_KEY
 #   npx wrangler secret put OPENAI_API_KEY   # optional AI filter
-#   npx wrangler secret put ALIEXPRESS_APP_KEY
 #   npx wrangler secret put ALIEXPRESS_APP_SECRET
 #   npx wrangler secret put ALIEXPRESS_ACCESS_TOKEN   # optional after OAuth
+#
+# App Key (542818) is set in [vars] below — do NOT also add it as a Secret.
+# Each `wrangler deploy` overwrites dashboard Text vars from this file.
 #
 # Do NOT use [secrets].required — Workers Builds fails the whole deploy
 # when required secrets are missing. Set secrets after the first deploy.
@@ -33,7 +35,8 @@ DASHBOARD_PIN = "1111"
 DEFAULT_MARKUP = "1.4"
 # Max images to push to Shopify per product
 MAX_PRODUCT_IMAGES = "8"
-# AliExpress Open Platform (AppKey is public; AppSecret stays in Secrets/Supabase)
+# AliExpress Open Platform — AppKey 542818 (Shixato). Must match AliExpress Console.
+# Do not change unless you create a new app in AliExpress Console.
 ALIEXPRESS_APP_KEY = "542818"
 ALIEXPRESS_CALLBACK_URL = "https://shixato.nvrgvup205.workers.dev/api/aliexpress/callback"
 

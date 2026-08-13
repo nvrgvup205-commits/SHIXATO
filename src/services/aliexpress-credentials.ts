@@ -1,4 +1,8 @@
 import type { Env } from "../types";
+import {
+  isExpectedAliExpressAppKey,
+  SHIXATO_ALIEXPRESS_APP_KEY,
+} from "../constants/aliexpress";
 import { SupabaseService } from "./supabase";
 
 export type AliExpressCredentials = {
@@ -56,14 +60,19 @@ export async function getAliExpressCredentialStatus(env: Env): Promise<{
   hasSupabaseAppKey: boolean;
   hasSupabaseAppSecret: boolean;
   configured: boolean;
+  expectedAppKey: string;
+  appKey: string | null;
+  appKeyMatches: boolean;
 }> {
-  const [supabaseAppKey, supabaseAppSecret] = await Promise.all([
+  const [supabaseAppKey, supabaseAppSecret, resolvedAppKey] = await Promise.all([
     readSetting(env, APP_KEY_SETTING),
     readSetting(env, APP_SECRET_SETTING),
+    resolveAppKey(env),
   ]);
 
   const hasEnvAppKey = Boolean(env.ALIEXPRESS_APP_KEY?.trim());
   const hasEnvAppSecret = Boolean(env.ALIEXPRESS_APP_SECRET?.trim());
+  const appKey = resolvedAppKey;
 
   return {
     hasEnvAppKey,
@@ -73,6 +82,9 @@ export async function getAliExpressCredentialStatus(env: Env): Promise<{
     configured: Boolean(
       (hasEnvAppKey || supabaseAppKey) && (hasEnvAppSecret || supabaseAppSecret),
     ),
+    expectedAppKey: SHIXATO_ALIEXPRESS_APP_KEY,
+    appKey,
+    appKeyMatches: isExpectedAliExpressAppKey(appKey),
   };
 }
 
