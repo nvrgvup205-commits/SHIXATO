@@ -37,13 +37,34 @@ async function readSetting(env: Env, key: string): Promise<string | null> {
 }
 
 async function resolveAppKey(env: Env): Promise<string | null> {
-  return env.ALIEXPRESS_APP_KEY?.trim() || (await readSetting(env, APP_KEY_SETTING));
+  const fromEnv = env.ALIEXPRESS_APP_KEY?.trim();
+  if (fromEnv) return fromEnv;
+  const fromDb = (await readSetting(env, APP_KEY_SETTING))?.trim();
+  return fromDb || null;
 }
 
 async function resolveAppSecret(env: Env): Promise<string | null> {
-  return (
-    env.ALIEXPRESS_APP_SECRET?.trim() || (await readSetting(env, APP_SECRET_SETTING))
-  );
+  const fromEnv = env.ALIEXPRESS_APP_SECRET?.trim();
+  if (fromEnv) return fromEnv;
+  const fromDb = (await readSetting(env, APP_SECRET_SETTING))?.trim();
+  return fromDb || null;
+}
+
+export async function getAliExpressSecretDiagnostics(env: Env): Promise<{
+  hasEnvSecret: boolean;
+  hasSupabaseSecret: boolean;
+  secretSource: "env" | "supabase" | "none";
+  secretLength: number;
+}> {
+  const envSecret = env.ALIEXPRESS_APP_SECRET?.trim();
+  const dbSecret = (await readSetting(env, APP_SECRET_SETTING))?.trim();
+  const secret = envSecret || dbSecret || "";
+  return {
+    hasEnvSecret: Boolean(envSecret),
+    hasSupabaseSecret: Boolean(dbSecret),
+    secretSource: envSecret ? "env" : dbSecret ? "supabase" : "none",
+    secretLength: secret.length,
+  };
 }
 
 export async function hasAliExpressAppCredentials(env: Env): Promise<boolean> {
@@ -63,12 +84,16 @@ export async function getAliExpressCredentialStatus(env: Env): Promise<{
   expectedAppKey: string;
   appKey: string | null;
   appKeyMatches: boolean;
+  secretSource: "env" | "supabase" | "none";
+  secretLength: number;
 }> {
-  const [supabaseAppKey, supabaseAppSecret, resolvedAppKey] = await Promise.all([
-    readSetting(env, APP_KEY_SETTING),
-    readSetting(env, APP_SECRET_SETTING),
-    resolveAppKey(env),
-  ]);
+  const [supabaseAppKey, supabaseAppSecret, resolvedAppKey, secretDiag] =
+    await Promise.all([
+      readSetting(env, APP_KEY_SETTING),
+      readSetting(env, APP_SECRET_SETTING),
+      resolveAppKey(env),
+      getAliExpressSecretDiagnostics(env),
+    ]);
 
   const hasEnvAppKey = Boolean(env.ALIEXPRESS_APP_KEY?.trim());
   const hasEnvAppSecret = Boolean(env.ALIEXPRESS_APP_SECRET?.trim());
@@ -85,6 +110,8 @@ export async function getAliExpressCredentialStatus(env: Env): Promise<{
     expectedAppKey: SHIXATO_ALIEXPRESS_APP_KEY,
     appKey,
     appKeyMatches: isExpectedAliExpressAppKey(appKey),
+    secretSource: secretDiag.secretSource,
+    secretLength: secretDiag.secretLength,
   };
 }
 

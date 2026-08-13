@@ -128,6 +128,8 @@ aliexpressAuth.get("/aliexpress/status", requireAuth, async (c) => {
       appKey: creds?.appKey ?? null,
       expectedAppKey: status.expectedAppKey,
       appKeyMatches: status.appKeyMatches,
+      secretSource: status.secretSource,
+      secretLength: status.secretLength,
       mode: creds?.accessToken ? "api_ready" : status.configured ? "needs_token" : "needs_credentials",
       links: {
         dashboard: `${workerOrigin}/dashboard`,
@@ -221,14 +223,79 @@ aliexpressAuth.get("/aliexpress/test", requireAuth, async (c) => {
     expiresAt: creds.tokenExpiresAt,
   });
 
+  const signatureError = /signature|IncompleteSignature|platform standards/i.test(
+    check.error ?? "",
+  );
+
   return c.json({
     ok: check.valid,
     data: {
       valid: check.valid,
       error: check.error ?? null,
+      errorKind: check.valid
+        ? "ok"
+        : signatureError
+          ? "bad_app_secret"
+          : "bad_access_token",
       appKey: creds.appKey,
+      secretLength: creds.appSecret.length,
       tokenPreview: creds.accessToken.slice(0, 8) + "…",
       expiresAt: creds.tokenExpiresAt,
+      hintAr: signatureError
+        ? "App Secret غلط أو فيه مسافة — انسخه من Console → Advanced Info → Cloudflare Secret ALIEXPRESS_APP_SECRET"
+        : check.valid
+          ? null
+          : "التوكن منتهي — اعمل OAuth من جديد (مش App Secret)",
+    },
+  });
+});
+
+/** فحص AppKey + AppSecret بدون كشف السر */
+aliexpressAuth.get("/aliexpress/credentials-check", requireAuth, async (c) => {
+  const status = await getAliExpressCredentialStatus(c.env);
+  const creds = status.configured ? await loadAliExpressCredentials(c.env) : null;
+
+  if (!creds?.appSecret) {
+    return c.json({
+      ok: false,
+      error: "ALIEXPRESS_APP_SECRET مفقود في Cloudflare Secrets",
+      data: {
+        ...status,
+        signatureOk: false,
+        hintAr: "أضف App Secret من AliExpress Console → Advanced Information",
+      },
+    });
+  }
+
+  const oauth = new AliExpressOAuth({
+    appKey: creds.appKey,
+    appSecret: creds.appSecret,
+    callbackUrl: creds.callbackUrl,
+  });
+
+  const secretProbe = await oauth.probeAppSecret();
+  const probe = creds.accessToken
+    ? await oauth.validateToken(creds.accessToken, { expiresAt: creds.tokenExpiresAt })
+    : { valid: false, error: "no_token" };
+
+  const signatureError =
+    !secretProbe.signatureOk ||
+    /signature|IncompleteSignature|platform standards/i.test(probe.error ?? "");
+
+  return c.json({
+    ok: secretProbe.signatureOk && (probe.valid || !creds.accessToken),
+    data: {
+      ...status,
+      signatureOk: secretProbe.signatureOk,
+      tokenValid: probe.valid,
+      probeError: secretProbe.error ?? probe.error ?? null,
+      hintAr: !secretProbe.signatureOk
+        ? "التوقيع فشل — App Secret لا يطابق AppKey 542618. الصق Secret من Console في Cloudflare ثم Deploy."
+        : !creds.accessToken
+          ? "App Secret صحيح ✅ — اعمل OAuth للحصول على Access Token"
+          : probe.valid
+            ? "كل شيء يعمل ✅"
+            : "App Secret صحيح — Access Token منتهي. اعمل OAuth من جديد",
     },
   });
 });
