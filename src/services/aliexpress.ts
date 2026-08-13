@@ -133,7 +133,7 @@ export class AliExpressService {
 
     const fetchPages = Math.min(
       Math.max(normalized.fetchPages ?? (normalized.presetGrade ? 2 : 1), 1),
-      3,
+      8,
     );
 
     const searchUrl = this.buildSearchUrl(normalized);

@@ -26,9 +26,12 @@ discover.post("/auto", requireAuth, async (c) => {
     shipToCountry?: string;
     currency?: string;
     keywordLimit?: number;
+    fetchPages?: number;
+    turbo?: boolean;
     minWow?: number;
     minScore?: number;
     maxResults?: number;
+    requireProblemSolving?: boolean;
   };
 
   if (!body.category?.trim()) {
@@ -41,8 +44,11 @@ discover.post("/auto", requireAuth, async (c) => {
       shipToCountry: body.shipToCountry,
       currency: body.currency,
       keywordLimit: body.keywordLimit,
+      fetchPages: body.fetchPages,
+      turbo: body.turbo,
       minWow: body.minWow ?? body.minScore,
       maxResults: body.maxResults,
+      requireProblemSolving: body.requireProblemSolving,
       env: c.env,
     });
 

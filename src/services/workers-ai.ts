@@ -188,7 +188,13 @@ export class WorkersAiService {
 عدد التقييمات: ${reviews || "غير معروف"}
 شحن مجاني: ${listing.isFreeShipping ? "نعم" : "لا"}
 Choice: ${listing.isChoice ? "نعم" : "لا"}
-تاريخ الإدراج: ${listing.storeLaunchDate ?? "غير معروف"}`;
+تاريخ الإدراج: ${listing.storeLaunchDate ?? "غير معروف"}
+تكلفة الشحن للسعودية: ${listing.shippingCost != null ? `${listing.shippingCost} ${listing.shippingCostCurrency ?? "SAR"}` : "غير معروف"}
+مدة التوصيل: ${listing.deliveryEstimate ?? "غير معروف"}
+الفئة: ${listing.categoryName ?? "غير معروف"}
+المتجر: ${listing.storeName ?? "غير معروف"}
+وصف المنتج (مختصر): ${listing.descriptionEn ? listing.descriptionEn.slice(0, 400) : "غير متوفر"}
+مصادر البيانات: ${listing.enrichmentSources?.join(", ") || "كارت بحث فقط"}`;
 
     const result = await this.env.AI!.run(MODEL, {
       messages: [

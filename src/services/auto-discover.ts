@@ -33,10 +33,16 @@ export interface AutoDiscoverOptions {
   shipToCountry?: string;
   currency?: string;
   keywordLimit?: number;
+  /** Pages per keyword (default 6 turbo / 3 standard, max 8) */
+  fetchPages?: number;
+  /** Turbo: 20 keywords × many pages + problem-solving focus */
+  turbo?: boolean;
   /** Minimum wow 1–10 (default 7) */
   minWow?: number;
   maxResults?: number;
   fallbackMinWow?: number;
+  /** When true, skip listings without clear problem-solving signal */
+  requireProblemSolving?: boolean;
   env?: Env;
 }
 
@@ -53,6 +59,8 @@ export interface AutoDiscoverResult {
   keywordsUsed: string[];
   keywordSource?: KeywordSource;
   keywordsScanned: number;
+  pagesPerKeyword: number;
+  turbo: boolean;
   totalRaw: number;
   totalUnique: number;
   totalPassedGate: number;
@@ -138,7 +146,17 @@ export class AutoDiscoverService {
       throw new HttpError(400, "فئة غير معروفة: " + categoryId);
     }
 
-    const keywordLimit = Math.min(Math.max(options.keywordLimit ?? 15, 10), 20);
+    const turbo = options.turbo !== false;
+    const keywordLimit = Math.min(
+      Math.max(options.keywordLimit ?? (turbo ? 20 : 15), 10),
+      20,
+    );
+    const fetchPages = Math.min(
+      Math.max(options.fetchPages ?? (turbo ? 6 : 3), 1),
+      8,
+    );
+    const requireProblemSolving =
+      options.requireProblemSolving ?? turbo;
     const minWow = options.minWow ?? 7;
     const fallbackMinWow = options.fallbackMinWow ?? 6;
     const maxResults = Math.min(Math.max(options.maxResults ?? 12, 3), 24);
@@ -188,7 +206,7 @@ export class AutoDiscoverService {
           sort: "orders",
           filterMode: "off",
           applyUrlFilters: false,
-          fetchPages: 2,
+          fetchPages,
           currency,
           shipToCountry: shipTo,
           discoveryMode: true,
@@ -204,6 +222,7 @@ export class AutoDiscoverService {
         for (const item of items) {
           const heuristic = computeWowHeuristic(item, keyword);
           if (heuristic.flags.includes("مرفوض")) continue;
+          if (requireProblemSolving && heuristic.problemClarity < 6) continue;
 
           const scored = buildScoredListing(
             item,
@@ -305,6 +324,8 @@ export class AutoDiscoverService {
       keywordsUsed: keywords,
       keywordSource,
       keywordsScanned: scanned,
+      pagesPerKeyword: fetchPages,
+      turbo,
       totalRaw,
       totalUnique: all.length,
       totalPassedGate: passed.length,

@@ -328,10 +328,15 @@ export function renderDashboardPage(storeDomain: string): string {
         <div class="auto-discover-banner">
           <div style="display:flex;flex-wrap:wrap;gap:.6rem;align-items:center;justify-content:space-between">
             <div>
-              <strong style="font-size:1.05rem">⚡ اكتشاف تلقائي مبهر</strong>
-              <p>كلمات قوية بالAI + إبهار المتجر (مش أرقام) — منتجات تثبت الإنسان وتحل مشكلة</p>
+              <strong style="font-size:1.05rem">⚡ اكتشاف تلقائي مبهر (توربو)</strong>
+              <p>20 كلمة ترندية بالAI · 6 صفحات لكل كلمة · منتجات تحل مشاكل حقيقية · بيانات كاملة للتحليل</p>
             </div>
-            <button class="btn btn-auto-discover" id="autoDiscoverBtn" type="button">ابدأ الاكتشاف (1–2 دقيقة)</button>
+            <div style="display:flex;flex-wrap:wrap;gap:.5rem;align-items:center">
+              <label class="check" style="font-size:.85rem;opacity:.95">
+                <input id="turboDiscover" type="checkbox" checked /> توربو (20 كلمة × 6 صفحات)
+              </label>
+              <button class="btn btn-auto-discover" id="autoDiscoverBtn" type="button">ابدأ الاكتشاف (3–5 دقائق)</button>
+            </div>
           </div>
         </div>
         <div class="search-topbar">
@@ -1150,8 +1155,13 @@ export function renderDashboardPage(storeDomain: string): string {
       const btn = $("autoDiscoverBtn");
       btn.disabled = true;
       const catLabel = $("category").selectedOptions[0]?.textContent || category;
-      showPresetTip("⚡ جاري البحث في عشرات الكلمات تلقائيًا — لا تغلق الصفحة (قد يستغرق دقيقة أو دقيقتين)");
-      $("searchStatus").textContent = "اكتشاف تلقائي في «" + catLabel + "»…";
+      const turbo = $("turboDiscover").checked;
+      showPresetTip(
+        turbo
+          ? "⚡ توربو: 20 كلمة × 6 صفحات — لا تغلق الصفحة (قد يستغرق 3–5 دقائق)"
+          : "⚡ جاري البحث في عشرات الكلمات — لا تغلق الصفحة (1–2 دقيقة)",
+      );
+      $("searchStatus").textContent = "اكتشاف " + (turbo ? "توربو " : "") + "في «" + catLabel + "»…";
       $("filterActions").classList.add("hidden");
 
       try {
@@ -1161,7 +1171,10 @@ export function renderDashboardPage(storeDomain: string): string {
             category,
             shipToCountry: $("shipToCountry").value,
             currency: $("currency").value,
-            keywordLimit: 15,
+            keywordLimit: turbo ? 20 : 15,
+            fetchPages: turbo ? 6 : 3,
+            turbo,
+            requireProblemSolving: turbo,
             minWow: 7,
             maxResults: 12,
           }),
@@ -1177,12 +1190,13 @@ export function renderDashboardPage(storeDomain: string): string {
         const stats = data.wowStats || data.scoreStats || {};
         const minUsed = data.minWowUsed ?? data.minScoreUsed ?? 7;
         $("searchStatus").textContent =
+          (data.turbo ? "توربو · " : "") +
           "إبهار: " + items.length + " منتج يثبت (≥ " + minUsed + "/10) · مُتجاهَل " +
           (state.discoverRejected.length || 0) +
           " · أعلى إبهار " + (stats.maxWow ?? stats.maxScore ?? "—") + "/10" +
           " · متوسط " + (stats.medianWow ?? stats.medianScore ?? "—") +
           " · " + (data.keywordSource === "workers-ai" ? "كلمات AI" : "كلمات احتياطية") +
-          " · " + (data.keywordsScanned || 0) + " كلمات · " +
+          " · " + (data.keywordsScanned || 0) + " كلمات × " + (data.pagesPerKeyword || "?") + " صفحات · " +
           (data.totalUnique || 0) + " فريد · " +
           (data.executionTimeSeconds || 0) + " ثانية" +
           (data.warning ? (" — " + data.warning) : "");

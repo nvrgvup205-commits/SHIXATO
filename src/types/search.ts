@@ -25,7 +25,7 @@ export interface ProductSearchFilters {
   filterMode?: "strict" | "soft" | "off";
   /** When false, AE URL uses query+sort only — filters applied locally (more results) */
   applyUrlFilters?: boolean;
-  /** Fetch multiple AE pages and merge (default 2 for presets) */
+  /** Fetch multiple AE pages and merge (default 2 for presets, up to 8 for turbo) */
   fetchPages?: number;
 
   /** URL / SSR filters sent to AliExpress */
