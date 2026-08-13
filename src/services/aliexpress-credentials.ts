@@ -19,7 +19,7 @@ const TOKEN_EXPIRES_KEY = "aliexpress_token_expires_at";
 export function resolveAliExpressCallbackUrl(env: Env): string {
   const raw =
     env.ALIEXPRESS_CALLBACK_URL?.trim() ||
-    "https://shixato.nvrgvup205.workers.dev/api/auth/aliexpress/callback";
+    "https://shixato.nvrgvup205.workers.dev/api/aliexpress/callback";
   return raw.replace(/([^:]\/)\/+/g, "$1");
 }
 
@@ -88,9 +88,17 @@ export async function loadAliExpressCredentials(env: Env): Promise<AliExpressCre
   let tokenExpiresAt: string | null = null;
 
   try {
-    accessToken = (await readSetting(env, ACCESS_TOKEN_KEY)) || accessToken;
-    refreshToken = await readSetting(env, REFRESH_TOKEN_KEY);
-    tokenExpiresAt = await readSetting(env, TOKEN_EXPIRES_KEY);
+    const db = new SupabaseService(env);
+    const tokenRow = await db.getAliExpressToken();
+    if (tokenRow) {
+      accessToken = tokenRow.access_token || accessToken;
+      refreshToken = tokenRow.refresh_token;
+      tokenExpiresAt = tokenRow.expires_at;
+    } else {
+      accessToken = (await readSetting(env, ACCESS_TOKEN_KEY)) || accessToken;
+      refreshToken = await readSetting(env, REFRESH_TOKEN_KEY);
+      tokenExpiresAt = await readSetting(env, TOKEN_EXPIRES_KEY);
+    }
   } catch {
     // Supabase optional for local dev
   }
@@ -123,11 +131,5 @@ export async function saveAliExpressTokens(
   },
 ): Promise<void> {
   const db = new SupabaseService(env);
-  await db.setSetting(ACCESS_TOKEN_KEY, tokens.accessToken);
-  if (tokens.refreshToken) {
-    await db.setSetting(REFRESH_TOKEN_KEY, tokens.refreshToken);
-  }
-  if (tokens.expiresAt) {
-    await db.setSetting(TOKEN_EXPIRES_KEY, tokens.expiresAt);
-  }
+  await db.saveAliExpressToken(tokens);
 }

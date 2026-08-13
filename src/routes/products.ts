@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { requireAliExpressToken } from "../middleware/aliexpress-auth";
 import { AliExpressApiClient } from "../services/aliexpress-api";
 import { AliExpressApiClientService } from "../services/aliexpress-api-client";
 import { loadAliExpressCredentials } from "../services/aliexpress-credentials";
@@ -48,7 +49,7 @@ products.post("/search", requireAuth, async (c) => {
 });
 
 /** Official AliExpress DS product profile (requires OAuth access token) */
-products.get("/profile/:productId", requireAuth, async (c) => {
+products.get("/profile/:productId", requireAuth, requireAliExpressToken(), async (c) => {
   const productId = c.req.param("productId").trim();
   if (!productId) {
     return c.json({ ok: false, error: "productId مطلوب" }, 400);
@@ -78,7 +79,7 @@ products.get("/profile/:productId", requireAuth, async (c) => {
 });
 
 /** Official AliExpress freight quote (requires OAuth access token) */
-products.post("/freight", requireAuth, async (c) => {
+products.post("/freight", requireAuth, requireAliExpressToken(), async (c) => {
   const body = (await c.req.json().catch(() => ({}))) as {
     productId?: string;
     aliexpressId?: string;

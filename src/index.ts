@@ -3,6 +3,7 @@ import { cors } from "hono/cors";
 import { logger } from "hono/logger";
 import { renderDashboardPage } from "./dashboard/page";
 import ai from "./routes/ai";
+import aliexpressAuth, { handleAliExpressOAuthCallback } from "./routes/aliexpress-auth";
 import auth from "./routes/auth";
 import discover from "./routes/discover";
 import favorites from "./routes/favorites";
@@ -43,6 +44,8 @@ app.get("/", (c) => {
       aiAnalyze: "POST /api/ai/analyze",
       favorites: "GET/POST /api/favorites",
       aliexpressConnect: "GET /api/auth/aliexpress/connect",
+      aliexpressCallback: "GET /api/auth/aliexpress/callback",
+      aliexpressCallbackAlias: "GET /api/aliexpress/callback",
       aliexpressStatus: "GET /api/auth/aliexpress/status",
       freight: "POST /api/products/freight",
       preview: "POST /api/products/preview",
@@ -67,6 +70,8 @@ app.get("/health", (c) =>
 );
 
 app.route("/api/auth", auth);
+app.route("/api/auth", aliexpressAuth);
+app.get("/api/aliexpress/callback", (c) => handleAliExpressOAuthCallback(c));
 app.route("/api/ai", ai);
 app.route("/api/discover", discover);
 app.route("/api/favorites", favorites);
