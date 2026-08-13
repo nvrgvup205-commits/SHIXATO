@@ -1,10 +1,27 @@
+import type { Env } from "../types";
 import { signAliExpressRequest } from "../utils/aliexpress-sign";
 import { fetchWithTimeout, HttpError } from "../utils/http";
+import { sleep } from "../utils/rate-limiter";
 import type { AliExpressCredentials } from "./aliexpress-credentials";
+import { loadAliExpressCredentials } from "./aliexpress-credentials";
+import { SupabaseService } from "./supabase";
 
-const REST_BASE = "https://api-sg.aliexpress.com/rest";
-const SYNC_BASE = "https://api-sg.aliexpress.com/sync";
-const OAUTH_AUTHORIZE = "https://api-sg.aliexpress.com/oauth/authorize";
+/** AliExpress Open Platform — signed server-to-server transport */
+const API_BASE = "https://api-sg.aliexpress.com";
+const REST_BASE = `${API_BASE}/rest`;
+const SYNC_BASE = `${API_BASE}/sync`;
+const OAUTH_AUTHORIZE = `${API_BASE}/oauth/authorize`;
+
+const DEFAULT_SHIP_TO = "SA";
+const SEARCH_CURRENCY = "USD";
+const SHIPPING_CURRENCY = "SAR";
+const CACHE_TTL_MS = 15 * 60 * 1000;
+const MIN_REQUEST_GAP_MS = 650;
+const MAX_RETRIES = 3;
+
+// ---------------------------------------------------------------------------
+// Public types
+// ---------------------------------------------------------------------------
 
 export type AliExpressTokenResponse = {
   access_token?: string;
@@ -25,15 +42,284 @@ export type AliExpressFreightOption = {
   trackingAvailable?: boolean;
 };
 
-export class AliExpressApiClient {
-  constructor(private readonly creds: AliExpressCredentials) {}
+/** نتيجة البحث — الحقول المطلوبة للداشبورد */
+export type AliExpressSearchProduct = {
+  product_id: string;
+  title: string;
+  price: number;
+  sales?: number;
+  rating?: number;
+  reviews?: number;
+  image_url: string;
+  link: string;
+};
 
+/** تفاصيل المنتج الكاملة من DS API */
+export type AliExpressProductDetails = {
+  product_id: string;
+  title: string;
+  description?: string;
+  price: number;
+  list_price?: number;
+  currency: string;
+  sales?: number;
+  rating?: number;
+  reviews?: number;
+  images: string[];
+  link: string;
+  category_id?: string;
+  store?: { id?: string; name?: string; rating?: number };
+  attributes: Array<{ name: string; value: string }>;
+  variants: Array<{
+    sku_id?: string;
+    title: string;
+    price: number;
+    currency: string;
+    available: boolean;
+    stock?: number;
+    image?: string;
+  }>;
+  raw?: Record<string, unknown>;
+};
+
+/** تكلفة الشحن للسعودية */
+export type AliExpressShippingCost = {
+  product_id: string;
+  quantity: number;
+  cost: number;
+  currency: string;
+  estimated_delivery_days?: string;
+  service_name: string;
+  tracking_available?: boolean;
+  all_options: AliExpressFreightOption[];
+};
+
+type CacheEntry<T> = { expiresAt: number; value: T };
+
+class MemoryCache {
+  private store = new Map<string, CacheEntry<unknown>>();
+
+  get<T>(key: string): T | null {
+    const row = this.store.get(key);
+    if (!row || Date.now() > row.expiresAt) {
+      if (row) this.store.delete(key);
+      return null;
+    }
+    return row.value as T;
+  }
+
+  set<T>(key: string, value: T, ttlMs = CACHE_TTL_MS): void {
+    this.store.set(key, { value, expiresAt: Date.now() + ttlMs });
+  }
+}
+
+class ApiRateLimiter {
+  private lastAt = 0;
+  async wait(): Promise<void> {
+    const gap = this.lastAt + MIN_REQUEST_GAP_MS - Date.now();
+    if (gap > 0) await sleep(gap);
+    this.lastAt = Date.now();
+  }
+}
+
+/**
+ * AliExpress DropShip API — توقيع Server-to-Server + استدعاءات عالية المستوى.
+ *
+ * ملاحظة مهمة: App Key + App Secret يوقّعان الطلب فقط.
+ * واجهات DropShip (منتجات/شحن) تحتاج أيضاً `session` (access token من OAuth).
+ * ضع ALIEXPRESS_ACCESS_TOKEN في env أو اربط OAuth مرة واحدة.
+ */
+export class AliExpressApi {
+  private readonly cache = new MemoryCache();
+  private readonly limiter = new ApiRateLimiter();
+
+  constructor(
+    private readonly creds: AliExpressCredentials,
+    private readonly env?: Env,
+  ) {}
+
+  static async fromEnv(env: Env): Promise<AliExpressApi> {
+    const creds = await loadAliExpressCredentials(env);
+    if (!creds) {
+      throw new HttpError(
+        500,
+        "AliExpress API غير مضبوط — أضف ALIEXPRESS_APP_KEY و ALIEXPRESS_APP_SECRET",
+      );
+    }
+    return new AliExpressApi(creds, env);
+  }
+
+  // -------------------------------------------------------------------------
+  // 1) searchProducts
+  // -------------------------------------------------------------------------
+
+  /**
+   * بحث المنتجات — يستخدم recommend feed ثم يفلتر بالكلمة محلياً.
+   * لا يوجد keyword search مباشر في DropShip API.
+   */
+  async searchProducts(
+    keyword: string,
+    pageNumber = 1,
+  ): Promise<AliExpressSearchProduct[]> {
+    const q = keyword.trim();
+    if (q.length < 2) {
+      throw new HttpError(400, "keyword يجب أن يكون حرفين على الأقل");
+    }
+
+    const page = Math.max(1, pageNumber);
+    const cacheKey = `search:${q}:${page}`;
+    const cached = this.cache.get<AliExpressSearchProduct[]>(cacheKey);
+    if (cached) return cached;
+
+    const raw = await this.callSync("aliexpress.ds.recommend.feed.get", {
+      feed_name: "DS bestseller",
+      country: DEFAULT_SHIP_TO,
+      target_currency: SEARCH_CURRENCY,
+      target_language: "EN",
+      page_size: "50",
+      page_no: String(page),
+      sort: "volumeDesc",
+    });
+
+    const items = this.extractFeedProducts(raw);
+    const needle = q.toLowerCase();
+    const mapped = items
+      .map((item) => this.mapSearchRow(item))
+      .filter((p) => p.title.toLowerCase().includes(needle));
+
+    await this.log("aliexpress_api:search", {
+      keyword: q,
+      page,
+      result_count: mapped.length,
+    });
+
+    this.cache.set(cacheKey, mapped);
+    return mapped;
+  }
+
+  // -------------------------------------------------------------------------
+  // 2) getProductDetails
+  // -------------------------------------------------------------------------
+
+  async getProductDetails(productId: string): Promise<AliExpressProductDetails> {
+    const id = productId.trim();
+    if (!id) throw new HttpError(400, "productId مطلوب");
+
+    const cacheKey = `product:${id}`;
+    const cached = this.cache.get<AliExpressProductDetails>(cacheKey);
+    if (cached) return cached;
+
+    const raw = await this.callSync("aliexpress.ds.product.get", {
+      product_id: id,
+      ship_to_country: DEFAULT_SHIP_TO,
+      target_currency: SEARCH_CURRENCY,
+      target_language: "EN",
+    });
+
+    const details = this.parseProductDetails(raw, id);
+    await this.log("aliexpress_api:product", { product_id: id });
+    this.cache.set(cacheKey, details);
+    return details;
+  }
+
+  // -------------------------------------------------------------------------
+  // 3) getShippingCost
+  // -------------------------------------------------------------------------
+
+  async getShippingCost(
+    productId: string,
+    quantity = 1,
+  ): Promise<AliExpressShippingCost> {
+    const id = productId.trim();
+    const qty = Math.max(1, Math.min(quantity, 99));
+    if (!id) throw new HttpError(400, "productId مطلوب");
+
+    const cacheKey = `freight:${id}:${qty}`;
+    const cached = this.cache.get<AliExpressShippingCost>(cacheKey);
+    if (cached) return cached;
+
+    const options = await this.calculateFreight({
+      productId: id,
+      quantity: qty,
+      shipToCountry: DEFAULT_SHIP_TO,
+    });
+
+    if (!options.length) {
+      throw new HttpError(502, "لم يُرجع AliExpress خيارات شحن للسعودية");
+    }
+
+    const cheapest = [...options].sort(
+      (a, b) => (a.amount ?? 0) - (b.amount ?? 0),
+    )[0]!;
+
+    const result: AliExpressShippingCost = {
+      product_id: id,
+      quantity: qty,
+      cost: cheapest.amount ?? 0,
+      currency: cheapest.currency ?? SHIPPING_CURRENCY,
+      estimated_delivery_days: cheapest.estimatedDeliveryTime,
+      service_name: cheapest.serviceName,
+      tracking_available: cheapest.trackingAvailable,
+      all_options: options,
+    };
+
+    await this.log("aliexpress_api:shipping", {
+      product_id: id,
+      quantity: qty,
+      cost: result.cost,
+      service: result.service_name,
+    });
+
+    this.cache.set(cacheKey, result, 30 * 60 * 1000);
+    return result;
+  }
+
+  // -------------------------------------------------------------------------
+  // Transport — signed requests (App Key + Secret [+ session])
+  // -------------------------------------------------------------------------
+
+  async callSync(
+    method: string,
+    apiParams: Record<string, string>,
+  ): Promise<Record<string, unknown>> {
+    return this.request(method, apiParams);
+  }
+
+  async calculateFreight(input: {
+    productId: string;
+    quantity?: number;
+    shipToCountry?: string;
+    provinceCode?: string;
+    cityCode?: string;
+    price?: string;
+  }): Promise<AliExpressFreightOption[]> {
+    this.requireAccessToken();
+
+    const payload = {
+      country_code: (input.shipToCountry || DEFAULT_SHIP_TO).toUpperCase(),
+      product_id: input.productId,
+      product_num: input.quantity ?? 1,
+      ...(input.provinceCode ? { province_code: input.provinceCode } : {}),
+      ...(input.cityCode ? { city_code: input.cityCode } : {}),
+      ...(input.price ? { price: input.price } : {}),
+    };
+
+    const raw = await this.callSync(
+      "aliexpress.logistics.buyer.freight.calculate",
+      {
+        param_aeop_freight_calculate_for_buyer_d_t_o: JSON.stringify(payload),
+      },
+    );
+
+    return this.parseFreightResponse(raw);
+  }
+
+  // OAuth helpers (للربط الاختياري)
   buildAuthorizeUrl(state?: string): string {
-    const redirectUri = this.creds.callbackUrl;
     const params = new URLSearchParams({
       response_type: "code",
       client_id: this.creds.appKey,
-      redirect_uri: redirectUri,
+      redirect_uri: this.creds.callbackUrl,
       force_auth: "true",
     });
     if (state) params.set("state", state);
@@ -44,57 +330,85 @@ export class AliExpressApiClient {
     return this.callRest("/auth/token/create", { code });
   }
 
-  async refreshToken(refreshToken?: string | null): Promise<AliExpressTokenResponse> {
+  async refreshToken(
+    refreshToken?: string | null,
+  ): Promise<AliExpressTokenResponse> {
     const token = refreshToken ?? this.creds.refreshToken;
     if (!token) {
-      throw new HttpError(400, "لا يوجد refresh token — أعد ربط حساب AliExpress");
+      throw new HttpError(400, "لا يوجد refresh token");
     }
     return this.callRest("/auth/token/refresh", { refresh_token: token });
   }
 
-  async getProduct(productId: string, shipToCountry = "SA", targetCurrency = "USD") {
-    this.requireAccessToken();
-    return this.callSync("aliexpress.ds.product.get", {
-      product_id: productId,
-      ship_to_country: shipToCountry,
-      target_currency: targetCurrency,
-      target_language: "EN",
-    });
+  private async request(
+    method: string,
+    apiParams: Record<string, string>,
+  ): Promise<Record<string, unknown>> {
+    let lastError: unknown;
+    for (let attempt = 0; attempt < MAX_RETRIES; attempt += 1) {
+      try {
+        await this.limiter.wait();
+        return await this.signedSyncCall(method, apiParams);
+      } catch (err) {
+        lastError = err;
+        const retryable =
+          err instanceof HttpError &&
+          (err.status === 429 || err.status >= 500 || err.status === 408);
+        if (!retryable || attempt === MAX_RETRIES - 1) break;
+        await sleep(400 * 2 ** attempt);
+      }
+    }
+    throw lastError;
   }
 
-  async calculateFreight(input: {
-    productId: string;
-    quantity?: number;
-    shipToCountry?: string;
-    provinceCode?: string;
-    cityCode?: string;
-    price?: string;
-    productNum?: number;
-  }): Promise<AliExpressFreightOption[]> {
-    this.requireAccessToken();
-    const payload = {
-      country_code: (input.shipToCountry || "SA").toUpperCase(),
-      product_id: input.productId,
-      product_num: input.quantity ?? input.productNum ?? 1,
-      ...(input.provinceCode ? { province_code: input.provinceCode } : {}),
-      ...(input.cityCode ? { city_code: input.cityCode } : {}),
-      ...(input.price ? { price: input.price } : {}),
+  private async signedSyncCall(
+    method: string,
+    apiParams: Record<string, string>,
+  ): Promise<Record<string, unknown>> {
+    const timestamp = String(Date.now());
+    const params: Record<string, string> = {
+      app_key: this.creds.appKey,
+      timestamp,
+      sign_method: "sha256",
+      method,
+      ...apiParams,
     };
+    if (this.creds.accessToken) {
+      params.session = this.creds.accessToken;
+    }
+    params.sign = await signAliExpressRequest(method, params, this.creds.appSecret);
 
-    const raw = await this.callSync("aliexpress.logistics.buyer.freight.calculate", {
-      param_aeop_freight_calculate_for_buyer_d_t_o: JSON.stringify(payload),
+    const body = new URLSearchParams(params);
+    const res = await fetchWithTimeout(SYNC_BASE, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded;charset=utf-8",
+      },
+      body,
     });
 
-    return this.parseFreightResponse(raw);
-  }
+    const json = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+    const error = json.error_response as
+      | { msg?: string; sub_msg?: string; code?: number }
+      | undefined;
 
-  private requireAccessToken(): void {
-    if (!this.creds.accessToken) {
+    if (res.status === 429) {
+      throw new HttpError(429, "AliExpress rate limit — جرّب لاحقاً", json);
+    }
+
+    if (!res.ok || error) {
+      const msg = error?.sub_msg || error?.msg || "AliExpress API request failed";
+      const needsAuth = /session|token|auth|permission|illegal access/i.test(msg);
       throw new HttpError(
-        401,
-        "AliExpress غير مربوط بعد — افتح /api/auth/aliexpress/connect وسجّل الدخول",
+        needsAuth ? 401 : 502,
+        needsAuth
+          ? `${msg} — أضف ALIEXPRESS_ACCESS_TOKEN أو اربط OAuth`
+          : msg,
+        json,
       );
     }
+
+    return json;
   }
 
   private async callRest(
@@ -141,47 +455,144 @@ export class AliExpressApiClient {
     return json;
   }
 
-  /** Signed IOP sync call (public for higher-level clients). */
-  async callSync(
-    method: string,
-    apiParams: Record<string, string>,
-  ): Promise<Record<string, unknown>> {
-    const timestamp = String(Date.now());
-    const params: Record<string, string> = {
-      app_key: this.creds.appKey,
-      timestamp,
-      sign_method: "sha256",
-      method,
-      ...apiParams,
-    };
-    if (this.creds.accessToken) {
-      params.session = this.creds.accessToken;
-    }
-    params.sign = await signAliExpressRequest(method, params, this.creds.appSecret);
-
-    const body = new URLSearchParams(params);
-    const res = await fetchWithTimeout(SYNC_BASE, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded;charset=utf-8",
-      },
-      body,
-    });
-
-    const json = (await res.json().catch(() => ({}))) as Record<string, unknown>;
-    const error = json.error_response as
-      | { msg?: string; sub_msg?: string; code?: number }
-      | undefined;
-
-    if (!res.ok || error) {
+  protected requireAccessToken(): void {
+    if (!this.creds.accessToken) {
       throw new HttpError(
-        502,
-        error?.sub_msg || error?.msg || "AliExpress API request failed",
-        json,
+        401,
+        "AliExpress يحتاج access token — ضع ALIEXPRESS_ACCESS_TOKEN في env أو /api/auth/aliexpress/connect",
       );
     }
+  }
 
-    return json;
+  // -------------------------------------------------------------------------
+  // Parsing
+  // -------------------------------------------------------------------------
+
+  private extractFeedProducts(raw: Record<string, unknown>): Record<string, unknown>[] {
+    const response =
+      (raw.aliexpress_ds_recommend_feed_get_response as Record<string, unknown>) || raw;
+    const result = (response.result as Record<string, unknown>) || response;
+    const list =
+      (result.products as unknown[]) ||
+      (result.product_list as unknown[]) ||
+      (result.aeop_ae_product_display_dto_list as unknown[]) ||
+      [];
+    return list.filter((row): row is Record<string, unknown> => !!row && typeof row === "object");
+  }
+
+  private mapSearchRow(item: Record<string, unknown>): AliExpressSearchProduct {
+    const product_id = String(
+      item.product_id ?? item.productId ?? item.item_id ?? item.id ?? "",
+    );
+    const title = String(item.product_title ?? item.title ?? item.subject ?? "Untitled");
+    const price = toNumber(item.sale_price ?? item.target_sale_price ?? item.price, 0);
+    const image_url = String(
+      item.product_main_image_url ?? item.image_url ?? item.main_image ?? "",
+    );
+    const link =
+      String(item.product_detail_url ?? item.detail_url ?? "") ||
+      `https://www.aliexpress.com/item/${product_id}.html`;
+
+    return {
+      product_id,
+      title,
+      price,
+      sales: toOptionalNumber(item.volume ?? item.sold_count ?? item.orders),
+      rating: toOptionalNumber(item.evaluate_rate ?? item.avg_rating ?? item.rating),
+      reviews: toOptionalNumber(item.review_count ?? item.feedback_count ?? item.reviews),
+      image_url,
+      link,
+    };
+  }
+
+  private parseProductDetails(
+    raw: Record<string, unknown>,
+    productId: string,
+  ): AliExpressProductDetails {
+    const response =
+      (raw.aliexpress_ds_product_get_response as Record<string, unknown>) || raw;
+    const result = (response.result as Record<string, unknown>) || response;
+    const base = (result.ae_item_base_info_dto as Record<string, unknown>) || result;
+    const storeNode = (result.ae_store_info as Record<string, unknown>) || {};
+
+    const title = String(base.subject ?? result.subject ?? result.title ?? "Untitled");
+    const currency = String(base.currency_code ?? result.currency_code ?? SEARCH_CURRENCY);
+    const images = extractImages(result);
+    const link = `https://www.aliexpress.com/item/${productId}.html`;
+
+    const skuNodes =
+      (result.ae_item_sku_info_dtos as Record<string, unknown>[]) ||
+      (result.sku_info_list as Record<string, unknown>[]) ||
+      [];
+
+    const listPrice = pickListPrice(skuNodes, base, result);
+    const price = pickSalePrice(skuNodes, base, result, listPrice);
+
+    const attrNodes =
+      (result.ae_item_properties as Record<string, unknown>[]) ||
+      (result.ae_item_property_dtos as Record<string, unknown>[]) ||
+      [];
+
+    const attributes = attrNodes
+      .map((row) => ({
+        name: String(row.attr_name ?? row.property_name ?? ""),
+        value: String(row.attr_value ?? row.property_value ?? ""),
+      }))
+      .filter((row) => row.name && row.value);
+
+    const variants = skuNodes.map((sku) => {
+      const props = (sku.aeop_s_k_u_propertys as Record<string, unknown>[]) || [];
+      const label = props
+        .map((p) => String(p.sku_property_value ?? ""))
+        .filter(Boolean)
+        .join(" / ");
+      const stock = toOptionalNumber(
+        sku.sku_available_stock ?? sku.s_k_u_available_stock ?? sku.ipm_sku_stock,
+      );
+      return {
+        sku_id: sku.id ? String(sku.id) : undefined,
+        title: String(label || sku.sku_attr || "Default"),
+        price: toNumber(sku.offer_sale_price ?? sku.sku_price, price),
+        currency,
+        available: stock != null ? stock > 0 : sku.sku_stock !== false,
+        stock: stock ?? undefined,
+        image: props.find((p) => p.sku_image)?.sku_image
+          ? String(props.find((p) => p.sku_image)!.sku_image)
+          : undefined,
+      };
+    });
+
+    return {
+      product_id: productId,
+      title,
+      description: base.detail ? String(base.detail) : undefined,
+      price,
+      list_price: listPrice,
+      currency,
+      sales: toOptionalNumber(
+        base.sales_count ?? result.sales_count ?? result.lastest_volume,
+      ),
+      rating: toOptionalNumber(
+        base.avg_evaluation_rating ?? result.avg_evaluation_rating,
+      ),
+      reviews: toOptionalNumber(base.evaluation_count ?? result.evaluation_count),
+      images,
+      link,
+      category_id:
+        base.category_id != null ? String(base.category_id) : undefined,
+      store: storeNode.store_name
+        ? {
+            id: storeNode.store_id != null ? String(storeNode.store_id) : undefined,
+            name: String(storeNode.store_name),
+            rating: toOptionalNumber(storeNode.item_as_described_rating),
+          }
+        : undefined,
+      attributes,
+      variants: variants.length
+        ? variants
+        : [{ title: "Default", price, currency, available: true }],
+      raw,
+    };
   }
 
   private parseFreightResponse(raw: Record<string, unknown>): AliExpressFreightOption[] {
@@ -207,11 +618,122 @@ export class AliExpressApiClient {
             ? String(row.estimated_delivery_time)
             : undefined,
           amount: freight.amount != null ? Number(freight.amount) : undefined,
-          currency: freight.currency_code ? String(freight.currency_code) : undefined,
+          currency: freight.currency_code ? String(freight.currency_code) : SHIPPING_CURRENCY,
           trackingAvailable:
             row.tracking_available === true || row.tracking_available === "true",
         } satisfies AliExpressFreightOption;
       })
       .filter((row) => row.serviceName !== "unknown" || row.amount != null);
   }
+
+  private async log(
+    action: string,
+    payload: Record<string, unknown>,
+    status: "success" | "failed" = "success",
+    errorMessage?: string,
+  ): Promise<void> {
+    if (!this.env?.SUPABASE_URL) return;
+    try {
+      const db = new SupabaseService(this.env);
+      await db.createSyncLog({
+        action,
+        status,
+        aliexpress_id:
+          typeof payload.product_id === "string" ? payload.product_id : null,
+        request_payload: payload,
+        response_payload: { ok: status === "success" },
+        error_message: errorMessage ?? null,
+      });
+    } catch {
+      // لا نوقف الطلب إذا فشل التسجيل
+    }
+  }
 }
+
+/** @deprecated استخدم AliExpressApi — محفوظ للتوافق مع الكود القديم */
+export class AliExpressApiClient extends AliExpressApi {
+  constructor(creds: AliExpressCredentials) {
+    super(creds);
+  }
+
+  async getProduct(
+    productId: string,
+    shipToCountry = DEFAULT_SHIP_TO,
+    targetCurrency = SEARCH_CURRENCY,
+  ) {
+    this.requireAccessToken();
+    return this.callSync("aliexpress.ds.product.get", {
+      product_id: productId,
+      ship_to_country: shipToCountry,
+      target_currency: targetCurrency,
+      target_language: "EN",
+    });
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function toNumber(value: unknown, fallback: number): number {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function toOptionalNumber(value: unknown): number | undefined {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : undefined;
+}
+
+function extractImages(node: Record<string, unknown>): string[] {
+  const gallery =
+    (node.ae_multimedia_info_dto as Record<string, unknown>)?.image_urls ||
+    node.product_main_image_url;
+  if (typeof gallery === "string") {
+    return gallery
+      .split(";")
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .slice(0, 12);
+  }
+  if (Array.isArray(gallery)) return gallery.map(String).filter(Boolean);
+  return [];
+}
+
+function pickSalePrice(
+  skuNodes: Record<string, unknown>[],
+  base: Record<string, unknown>,
+  result: Record<string, unknown>,
+  listPrice?: number,
+): number {
+  const skuPrices = skuNodes
+    .map((sku) => toNumber(sku.offer_sale_price ?? sku.sku_price, NaN))
+    .filter((n) => Number.isFinite(n) && n > 0);
+  if (skuPrices.length) return Math.min(...skuPrices);
+  const direct = toNumber(
+    base.sale_price ?? base.target_sale_price ?? result.sale_price,
+    0,
+  );
+  return direct > 0 ? direct : (listPrice ?? 0);
+}
+
+function pickListPrice(
+  skuNodes: Record<string, unknown>[],
+  base: Record<string, unknown>,
+  result: Record<string, unknown>,
+): number | undefined {
+  const skuList = skuNodes
+    .map((sku) => toNumber(sku.sku_price, NaN))
+    .filter((n) => Number.isFinite(n) && n > 0);
+  if (skuList.length) return Math.max(...skuList);
+  return toOptionalNumber(base.original_price ?? result.original_price);
+}
+
+// expose for tests
+export const __testables = {
+  toNumber,
+  toOptionalNumber,
+  extractImages,
+  pickSalePrice,
+  pickListPrice,
+};
