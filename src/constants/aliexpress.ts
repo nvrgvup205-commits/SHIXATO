@@ -5,6 +5,9 @@
  */
 export const SHIXATO_ALIEXPRESS_APP_KEY = "542618";
 
+/** Business (DS) APIs — use /rest + access_token, not /sync + session. */
+export const ALIEXPRESS_BUSINESS_REST_BASE = "https://api-sg.aliexpress.com/rest";
+
 export function isExpectedAliExpressAppKey(appKey: string | null | undefined): boolean {
   return String(appKey ?? "").trim() === SHIXATO_ALIEXPRESS_APP_KEY;
 }

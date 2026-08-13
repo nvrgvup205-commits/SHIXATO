@@ -262,6 +262,21 @@ export class SupabaseService {
     return data as AliExpressTokenRecord;
   }
 
+  async clearAliExpressToken(): Promise<void> {
+    const { error } = await this.client
+      .from("aliexpress_tokens")
+      .delete()
+      .eq("id", "default");
+
+    if (error) {
+      throw new HttpError(500, "Failed to clear AliExpress token", error);
+    }
+
+    await this.setSetting("aliexpress_access_token", "");
+    await this.setSetting("aliexpress_refresh_token", "");
+    await this.setSetting("aliexpress_token_expires_at", "");
+  }
+
   async getAliExpressToken(): Promise<AliExpressTokenRecord | null> {
     const { data, error } = await this.client
       .from("aliexpress_tokens")

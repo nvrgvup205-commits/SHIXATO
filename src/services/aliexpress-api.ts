@@ -1,5 +1,10 @@
 import type { Env } from "../types";
+import { ALIEXPRESS_BUSINESS_REST_BASE } from "../constants/aliexpress";
 import { signAliExpressRequest } from "../utils/aliexpress-sign";
+import {
+  extractAliExpressApiError,
+  isAliExpressAuthError,
+} from "../utils/aliexpress-api-error";
 import { fetchWithTimeout, HttpError } from "../utils/http";
 import { sleep } from "../utils/rate-limiter";
 import type { AliExpressCredentials } from "./aliexpress-credentials";
@@ -9,7 +14,7 @@ import { SupabaseService } from "./supabase";
 /** AliExpress Open Platform — signed server-to-server transport */
 const API_BASE = "https://api-sg.aliexpress.com";
 const REST_BASE = `${API_BASE}/rest`;
-const SYNC_BASE = `${API_BASE}/sync`;
+const BUSINESS_REST_BASE = ALIEXPRESS_BUSINESS_REST_BASE;
 const OAUTH_AUTHORIZE = `${API_BASE}/oauth/authorize`;
 
 const DEFAULT_SHIP_TO = "SA";
@@ -126,7 +131,7 @@ class ApiRateLimiter {
  * AliExpress DropShip API — توقيع Server-to-Server + استدعاءات عالية المستوى.
  *
  * ملاحظة مهمة: App Key + App Secret يوقّعان الطلب فقط.
- * واجهات DropShip (منتجات/شحن) تحتاج أيضاً `session` (access token من OAuth).
+ * واجهات DropShip (منتجات/شحن) تحتاج `access_token` من OAuth على بوابة `/rest`.
  * ضع ALIEXPRESS_ACCESS_TOKEN في env أو اربط OAuth مرة واحدة.
  */
 export class AliExpressApi {
@@ -348,7 +353,7 @@ export class AliExpressApi {
     for (let attempt = 0; attempt < MAX_RETRIES; attempt += 1) {
       try {
         await this.limiter.wait();
-        return await this.signedSyncCall(method, apiParams);
+        return await this.signedBusinessCall(method, apiParams);
       } catch (err) {
         lastError = err;
         const retryable =
@@ -361,7 +366,7 @@ export class AliExpressApi {
     throw lastError;
   }
 
-  private async signedSyncCall(
+  private async signedBusinessCall(
     method: string,
     apiParams: Record<string, string>,
   ): Promise<Record<string, unknown>> {
@@ -374,12 +379,12 @@ export class AliExpressApi {
       ...apiParams,
     };
     if (this.creds.accessToken) {
-      params.session = this.creds.accessToken;
+      params.access_token = this.creds.accessToken;
     }
     params.sign = await signAliExpressRequest(method, params, this.creds.appSecret);
 
     const body = new URLSearchParams(params);
-    const res = await fetchWithTimeout(SYNC_BASE, {
+    const res = await fetchWithTimeout(BUSINESS_REST_BASE, {
       method: "POST",
       headers: {
         "Content-Type": "application/x-www-form-urlencoded;charset=utf-8",
@@ -388,9 +393,7 @@ export class AliExpressApi {
     });
 
     const json = (await res.json().catch(() => ({}))) as Record<string, unknown>;
-    const error = json.error_response as
-      | { msg?: string; sub_msg?: string; code?: number }
-      | undefined;
+    const error = extractAliExpressApiError(json);
 
     if (res.status === 429) {
       throw new HttpError(429, "AliExpress rate limit — جرّب لاحقاً", json);
@@ -398,7 +401,7 @@ export class AliExpressApi {
 
     if (!res.ok || error) {
       const msg = error?.sub_msg || error?.msg || "AliExpress API request failed";
-      const needsAuth = /session|token|auth|permission|illegal access/i.test(msg);
+      const needsAuth = isAliExpressAuthError(msg);
       throw new HttpError(
         needsAuth ? 401 : 502,
         needsAuth

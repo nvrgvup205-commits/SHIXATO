@@ -4,6 +4,7 @@ import {
   SHIXATO_ALIEXPRESS_APP_KEY,
 } from "../constants/aliexpress";
 import { SupabaseService } from "./supabase";
+import { sanitizeAccessToken } from "./aliexpress-oauth";
 
 export type AliExpressCredentials = {
   appKey: string;
@@ -146,11 +147,11 @@ export async function loadAliExpressCredentials(env: Env): Promise<AliExpressCre
     const db = new SupabaseService(env);
     const tokenRow = await db.getAliExpressToken();
     if (tokenRow) {
-      accessToken = tokenRow.access_token || accessToken;
-      refreshToken = tokenRow.refresh_token;
+      accessToken = sanitizeAccessToken(tokenRow.access_token) || accessToken;
+      refreshToken = tokenRow.refresh_token?.trim() || null;
       tokenExpiresAt = tokenRow.expires_at;
     } else {
-      accessToken = (await readSetting(env, ACCESS_TOKEN_KEY)) || accessToken;
+      accessToken = sanitizeAccessToken((await readSetting(env, ACCESS_TOKEN_KEY)) ?? undefined) || accessToken;
       refreshToken = await readSetting(env, REFRESH_TOKEN_KEY);
       tokenExpiresAt = await readSetting(env, TOKEN_EXPIRES_KEY);
     }

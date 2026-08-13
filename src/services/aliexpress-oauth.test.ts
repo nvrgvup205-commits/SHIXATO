@@ -3,6 +3,8 @@ import {
   AliExpressOAuth,
   ALIEXPRESS_OAUTH_AUTHORIZE_URL,
   resolveTokenExpiry,
+  sanitizeAccessToken,
+  unwrapAliExpressTokenPayload,
 } from "./aliexpress-oauth";
 
 describe("AliExpressOAuth", () => {
@@ -37,5 +39,20 @@ describe("AliExpressOAuth", () => {
     const fromSeconds = resolveTokenExpiry({ expires_in: 3600 });
     expect(fromSeconds).not.toBeNull();
     expect(Date.parse(fromSeconds!)).toBeGreaterThan(Date.now());
+
+    const fromString = resolveTokenExpiry({ expire_time: "2026-09-12 12:00:00" });
+    expect(fromString).not.toBeNull();
+  });
+
+  it("unwraps gopResponseBody token payloads", () => {
+    const raw = unwrapAliExpressTokenPayload({
+      gopResponseBody: JSON.stringify({
+        access_token: "50000901abc",
+        refresh_token: "refresh",
+        expires_in: 3600,
+      }),
+    });
+    expect(raw.access_token).toBe("50000901abc");
+    expect(sanitizeAccessToken(" 50000901abc\n")).toBe("50000901abc");
   });
 });
