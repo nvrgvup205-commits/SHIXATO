@@ -3,10 +3,9 @@ import {
   getCategorySearchKeywords,
 } from "../data/category-keywords";
 import type { AliExpressListing, Env, ProductSearchFilters } from "../types";
-import { runParallelBatches } from "../utils/rate-limiter";
 import { mapApiSearchProductToListing } from "./api-listing-mapper";
 import { AliExpressApi } from "./aliexpress-api";
-import { AliExpressService } from "./aliexpress";
+import { scrapeSearchKeyword } from "./aliexpress-scrape";
 import { hasAliExpressAccessToken } from "./aliexpress-credentials";
 import { computeWowHeuristic } from "./wow-scoring";
 
@@ -16,12 +15,10 @@ export interface DeepSearchOptions {
   extraKeywords?: string[];
   fetchPages?: number;
   maxKeywords?: number;
-  parallelBatch?: number;
   targetPoolSize?: number;
   currency?: string;
   shipToCountry?: string;
   locale?: "ar" | "en";
-  filters?: Partial<ProductSearchFilters>;
 }
 
 export interface DeepSearchResult {
@@ -30,6 +27,7 @@ export interface DeepSearchResult {
   scrapeCount: number;
   apiCount: number;
   stoppedEarly: boolean;
+  errors: string[];
 }
 
 function mergeListings(
@@ -55,93 +53,41 @@ function rankPool(
   });
 }
 
-function baseFilters(
-  options: DeepSearchOptions,
-): ProductSearchFilters {
-  return {
-    page: 1,
-    sort: "orders",
-    locale: options.locale ?? "ar",
-    filterMode: "off",
-    applyUrlFilters: false,
-    discoveryMode: false,
-    currency: (options.currency || "USD").toUpperCase(),
-    shipToCountry: (options.shipToCountry || "SA").toUpperCase(),
-    fetchPages: Math.min(Math.max(options.fetchPages ?? 3, 1), 8),
-    ...options.filters,
-  };
-}
-
-async function scrapeKeyword(
-  keyword: string,
-  filters: ProductSearchFilters,
-): Promise<AliExpressListing[]> {
-  const service = new AliExpressService();
-  const attempts: ProductSearchFilters[] = [
-    { ...filters, query: keyword, locale: filters.locale ?? "ar" },
-    { ...filters, query: keyword, locale: "en" },
-  ];
-
-  for (const attempt of attempts) {
-    try {
-      const result = await service.search(attempt);
-      const items = result.resultsBeforeFilter ?? result.results ?? [];
-      if (items.length > 0) return items;
-    } catch {
-      // try next locale / URL strategy
-    }
-  }
-  return [];
-}
-
-async function apiKeywordPool(
+async function fetchApiPool(
   env: Env,
-  keyword: string,
-  fetchPages: number,
+  keyword: string | undefined,
+  pages: number,
   currency?: string,
 ): Promise<AliExpressListing[]> {
   try {
     const api = await AliExpressApi.fromEnv(env);
     const rows = await api.fetchRecommendFeed({
       keyword,
-      pages: Math.min(fetchPages, 4),
+      pages: Math.min(pages, 4),
       strictKeyword: false,
     });
     return rows.map((row) => mapApiSearchProductToListing(row, currency));
-  } catch {
+  } catch (err) {
+    console.warn("API feed failed", err);
     return [];
   }
 }
 
-async function fetchKeywordPool(
-  env: Env,
-  keyword: string,
-  filters: ProductSearchFilters,
-  hasToken: boolean,
-): Promise<{ scrape: AliExpressListing[]; api: AliExpressListing[] }> {
-  const [scrape, api] = await Promise.all([
-    scrapeKeyword(keyword, filters),
-    hasToken
-      ? apiKeywordPool(env, keyword, filters.fetchPages ?? 3, filters.currency)
-      : Promise.resolve([] as AliExpressListing[]),
-  ]);
-  return { scrape, api };
-}
-
 /**
- * Deep parallel search — the fastest reliable path to fill a product pool.
- * Uses curated category keywords, parallel batches, early exit, and dual URL strategies.
+ * Deep search — API first (if token), then sequential scrape per keyword.
+ * No parallel AliExpress fetches (avoids Worker IP blocks + race conditions).
  */
 export async function deepSearchPool(
   env: Env,
   options: DeepSearchOptions,
 ): Promise<DeepSearchResult> {
   const hasToken = await hasAliExpressAccessToken(env);
-  const filters = baseFilters(options);
-  const fetchPages = filters.fetchPages ?? 3;
-  const maxKeywords = Math.min(Math.max(options.maxKeywords ?? 8, 3), 12);
-  const parallelBatch = Math.min(Math.max(options.parallelBatch ?? 4, 2), 6);
-  const targetPoolSize = Math.max(options.targetPoolSize ?? 48, 24);
+  const fetchPages = Math.min(Math.max(options.fetchPages ?? 2, 1), 4);
+  const maxKeywords = Math.min(Math.max(options.maxKeywords ?? 6, 2), 10);
+  const targetPoolSize = Math.max(options.targetPoolSize ?? 48, 20);
+  const currency = (options.currency || "USD").toUpperCase();
+  const shipTo = (options.shipToCountry || "SA").toUpperCase();
+  const errors: string[] = [];
 
   const keywords = buildSearchKeywordChain(
     options.primaryQuery,
@@ -151,44 +97,90 @@ export async function deepSearchPool(
 
   if (options.extraKeywords?.length) {
     for (const kw of options.extraKeywords) {
+      const t = kw.trim();
       if (
-        kw.trim().length >= 2 &&
-        !keywords.some((q) => q.toLowerCase() === kw.toLowerCase())
+        t.length >= 2 &&
+        !keywords.some((q) => q.toLowerCase() === t.toLowerCase())
       ) {
-        keywords.push(kw.trim());
+        keywords.push(t);
       }
     }
   }
 
-  const keywordList = keywords.slice(0, maxKeywords);
+  const keywordList = [...new Set(keywords.map((k) => k.trim()).filter(Boolean))].slice(
+    0,
+    maxKeywords,
+  );
+
   let pool: AliExpressListing[] = [];
   let scrapeCount = 0;
   let apiCount = 0;
   let stoppedEarly = false;
 
-  await runParallelBatches(
-    keywordList,
-    parallelBatch,
-    async (keyword) => {
-      if (pool.length >= targetPoolSize) {
-        stoppedEarly = true;
-        return;
+  const scrapeOpts = {
+    pages: fetchPages,
+    sort: "orders" as const,
+    currency,
+    shipToCountry: shipTo,
+    locale: "en" as const,
+  };
+
+  // 1) API feed first — works even when scrape is blocked on Workers
+  if (hasToken) {
+    const apiItems = await fetchApiPool(
+      env,
+      options.primaryQuery,
+      fetchPages + 1,
+      currency,
+    );
+    apiCount += apiItems.length;
+    pool = mergeListings(pool, apiItems);
+
+    if (pool.length < targetPoolSize) {
+      const broadApi = await fetchApiPool(env, undefined, 3, currency);
+      apiCount += broadApi.length;
+      pool = mergeListings(pool, broadApi);
+    }
+  }
+
+  if (pool.length >= targetPoolSize) {
+    return {
+      pool: rankPool(pool, options.primaryQuery),
+      keywordsTried: keywordList,
+      scrapeCount,
+      apiCount,
+      stoppedEarly: true,
+      errors,
+    };
+  }
+
+  // 2) Sequential scrape — one keyword at a time (reliable on Workers)
+  for (const keyword of keywordList) {
+    if (pool.length >= targetPoolSize) {
+      stoppedEarly = true;
+      break;
+    }
+
+    try {
+      const scraped = await scrapeSearchKeyword(keyword, scrapeOpts);
+      scrapeCount += scraped.length;
+      pool = mergeListings(pool, scraped);
+
+      if (hasToken && pool.length < targetPoolSize) {
+        const apiKw = await fetchApiPool(env, keyword, 2, currency);
+        apiCount += apiKw.length;
+        pool = mergeListings(pool, apiKw);
       }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "scrape failed";
+      errors.push(`${keyword}: ${msg}`);
+    }
 
-      const { scrape, api } = await fetchKeywordPool(
-        env,
-        keyword,
-        { ...filters, fetchPages },
-        hasToken,
-      );
-      scrapeCount += scrape.length;
-      apiCount += api.length;
-      pool = mergeListings(pool, mergeListings(scrape, api));
-
-      if (pool.length >= targetPoolSize) stoppedEarly = true;
-    },
-    250,
-  );
+    if (pool.length >= targetPoolSize) {
+      stoppedEarly = true;
+      break;
+    }
+  }
 
   return {
     pool: rankPool(pool, options.primaryQuery),
@@ -196,10 +188,10 @@ export async function deepSearchPool(
     scrapeCount,
     apiCount,
     stoppedEarly,
+    errors,
   };
 }
 
-/** Resolve keywords for discover — curated first, no AI wait. */
 export function resolveDiscoverKeywords(
   categoryId: string,
   limit = 8,

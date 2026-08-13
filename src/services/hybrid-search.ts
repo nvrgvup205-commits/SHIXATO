@@ -84,12 +84,10 @@ async function runHybridSearch(
     primaryQuery: resolved.query,
     fetchPages,
     maxKeywords: resolved.categoryId ? 6 : 3,
-    parallelBatch: 4,
     targetPoolSize: 60,
     currency: normalized.currency,
     shipToCountry: normalized.shipToCountry,
     locale: normalized.locale,
-    filters: normalized,
   });
 
   const pool = deep.pool;

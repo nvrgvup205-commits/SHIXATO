@@ -1239,7 +1239,11 @@ export function renderDashboardPage(storeDomain: string): string {
         state.discoverApproved = items.length ? items : rejected.slice(0, 16);
         state.discoverRejected = rejected;
 
-        const displayItems = items.length ? items : rejected.slice(0, 16);
+        const displayItems = items.length
+          ? items
+          : rejected.length
+            ? rejected
+            : (data.resultsBeforeFilter || []).slice(0, 48);
 
         const stats = data.wowStats || data.scoreStats || {};
         const minUsed = data.minWowUsed ?? data.minScoreUsed ?? 7;

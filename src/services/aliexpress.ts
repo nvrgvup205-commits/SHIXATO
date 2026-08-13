@@ -129,10 +129,9 @@ export class AliExpressService {
       locale: filters.locale === "en" ? "en" : "ar",
       filterMode:
         filters.filterMode ??
-        (filters.presetGrade ? "soft" : "strict"),
+        (filters.presetGrade ? "soft" : "off"),
       applyUrlFilters:
-        filters.applyUrlFilters ??
-        (filters.presetGrade ? false : true),
+        filters.applyUrlFilters ?? false,
     };
 
     const locale = normalized.locale === "en" ? "en" : "ar";
