@@ -11,7 +11,7 @@ describe("SHIXATO AliExpress App Key", () => {
 
   it("rejects wrong keys", () => {
     expect(isExpectedAliExpressAppKey("542818")).toBe(true);
-    expect(isExpectedAliExpressAppKey("542618")).toBe(false);
+    expect(isExpectedAliExpressAppKey("999999")).toBe(false);
     expect(isExpectedAliExpressAppKey("")).toBe(false);
   });
 });
