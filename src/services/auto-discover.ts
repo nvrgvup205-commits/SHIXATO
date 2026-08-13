@@ -12,6 +12,7 @@ import {
   hasAliExpressAccessToken,
 } from "./aliexpress-credentials";
 import { searchListingsForKeyword } from "./hybrid-search";
+import { enrichListingsFromApi } from "./listing-enricher";
 import { KeywordGeneratorService, type KeywordSource } from "./keyword-generator";
 import { WowAnalyzerService } from "./wow-analyzer";
 import {
@@ -274,7 +275,7 @@ export class AutoDiscoverService {
         const items = await searchListingsForKeyword(options.env, keyword, {
           fetchPages,
           currency,
-          enrichLimit: turbo ? 16 : 12,
+          enrichLimit: 0,
         });
         totalRaw += items.length;
         scanned += 1;
@@ -329,10 +330,17 @@ export class AutoDiscoverService {
     const minWowUsed = picked.minWowUsed;
     const passed = all.filter((item) => item.wowScore >= minWowUsed);
 
-    const results = picked.results.map((item) => ({
+    let results = picked.results.map((item) => ({
       ...item,
       discoverRejected: false,
     }));
+
+    if (options.env && results.length) {
+      results = await enrichListingsFromApi(options.env, results, {
+        limit: results.length,
+        concurrency: 4,
+      });
+    }
 
     const resultIds = new Set(results.map((r) => r.aliexpressId));
     const rejectedResults = all
