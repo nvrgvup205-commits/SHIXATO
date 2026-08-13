@@ -183,7 +183,6 @@ export class AutoDiscoverService {
       extraKeywords: keywords.filter((k) => k !== cat.query),
       fetchPages,
       maxKeywords: keywordLimit,
-      parallelBatch: turbo ? 4 : 3,
       targetPoolSize: turbo ? 96 : 72,
       currency,
       shipToCountry: shipTo,
@@ -201,7 +200,7 @@ export class AutoDiscoverService {
     const impressive = all.filter((x) => x.wowScore >= minWowUsed);
     const lowWow = all.filter((x) => x.wowScore < minWowUsed);
 
-    let results = all.slice(0, maxResults).map((item) => ({
+    let results: ScoredDiscoverListing[] = all.slice(0, maxResults).map((item) => ({
       ...item,
       discoverRejected: item.wowScore < minWowUsed,
       discoverRejectReason:
@@ -211,9 +210,14 @@ export class AutoDiscoverService {
     }));
 
     if (options.env && results.length) {
-      results = await enrichListingsFromApi(options.env, results, {
+      const enriched = await enrichListingsFromApi(options.env, results, {
         limit: Math.min(results.length, 24),
         concurrency: 4,
+      });
+      const byId = new Map(enriched.map((l) => [l.aliexpressId, l]));
+      results = results.map((item) => {
+        const next = byId.get(item.aliexpressId);
+        return next ? { ...item, ...next } : item;
       });
     }
 

@@ -198,7 +198,6 @@ export async function searchListingsForKeyword(
     primaryQuery: keyword,
     fetchPages: options.fetchPages,
     maxKeywords: 1,
-    parallelBatch: 1,
     targetPoolSize: 80,
     currency: options.currency,
   });

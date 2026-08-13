@@ -13,7 +13,7 @@ export function extractAliExpressApiError(json: Record<string, unknown>):
     (json.type === "ISV" || typeof code === "string" || typeof code === "number") &&
     typeof message === "string"
   ) {
-    return { code, msg: message };
+    return { code: code as string | number, msg: message };
   }
 
   return undefined;
