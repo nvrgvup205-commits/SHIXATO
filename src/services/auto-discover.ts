@@ -63,6 +63,7 @@ export interface AutoDiscoverResult {
   wowStats: WowScoreStats;
   results: ScoredDiscoverListing[];
   rejectedResults: ScoredDiscoverListing[];
+  resultsBeforeFilter?: AliExpressListing[];
   warning?: string;
   errors: Array<{ keyword: string; message: string }>;
 }
@@ -234,7 +235,11 @@ export class AutoDiscoverService {
 
     let warning: string | undefined;
     if (!results.length) {
-      warning = `لم نجد منتجات — جرّب فئة أخرى أو أعد المحاولة`;
+      const errHint = deep.errors.length
+        ? ` · أخطاء: ${deep.errors.slice(0, 2).join("; ")}`
+        : "";
+      warning =
+        `لم نجد منتجات — جرّب فئة أخرى أو اربط AliExpress API${errHint}`;
     } else {
       warning =
         `${results.length} منتج من ${deep.keywordsTried.length} كلمات` +
@@ -264,8 +269,9 @@ export class AutoDiscoverService {
       wowStats,
       results,
       rejectedResults,
+      resultsBeforeFilter: deep.pool,
       warning,
-      errors: [],
+      errors: deep.errors.map((message) => ({ keyword: "", message })),
     };
   }
 }
