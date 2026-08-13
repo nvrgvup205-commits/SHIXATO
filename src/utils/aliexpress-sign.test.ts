@@ -21,19 +21,19 @@ describe("aliexpress-sign", () => {
   it("builds sign base with api path prefix", () => {
     expect(
       buildAliExpressSignBase("/auth/token/create", {
-        app_key: "542818",
+        app_key: "542618",
         code: "abc",
         sign_method: "sha256",
         timestamp: "123",
       }),
-    ).toBe("/auth/token/createapp_key542818codeabcsign_methodsha256timestamp123");
+    ).toBe("/auth/token/createapp_key542618codeabcsign_methodsha256timestamp123");
   });
 
   it("produces stable uppercase hex signature", async () => {
     const sign = await signAliExpressRequest(
       "/auth/token/create",
       {
-        app_key: "542818",
+        app_key: "542618",
         code: "test-code",
         sign_method: "sha256",
         timestamp: "1700000000000",
@@ -44,7 +44,7 @@ describe("aliexpress-sign", () => {
     const again = await signAliExpressRequest(
       "/auth/token/create",
       {
-        app_key: "542818",
+        app_key: "542618",
         code: "test-code",
         sign_method: "sha256",
         timestamp: "1700000000000",

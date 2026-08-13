@@ -7,7 +7,7 @@ import {
 
 describe("AliExpressOAuth", () => {
   const oauth = new AliExpressOAuth({
-    appKey: "542818",
+    appKey: "542618",
     appSecret: "test-secret",
     callbackUrl: "https://shixato.nvrgvup205.workers.dev/api/aliexpress/callback",
   });
@@ -15,7 +15,7 @@ describe("AliExpressOAuth", () => {
   it("builds the official authorize URL with state", () => {
     const url = oauth.getAuthorizationUrl("state-123");
     expect(url.startsWith(ALIEXPRESS_OAUTH_AUTHORIZE_URL)).toBe(true);
-    expect(url).toContain("client_id=542818");
+    expect(url).toContain("client_id=542618");
     expect(url).toContain("response_type=code");
     expect(url).toContain("force_auth=true");
     expect(url).toContain(

@@ -1513,7 +1513,7 @@ export function renderDashboardPage(storeDomain: string): string {
         const ok = d.hasAccessToken;
         const keyOk = d.appKeyMatches !== false;
         hint.textContent = !keyOk
-          ? "⚠️ AppKey غير مطابق — المفروض " + (d.expectedAppKey || "542818") + " (راجع Cloudflare Variables)"
+          ? "⚠️ AppKey غير مطابق — المفروض " + (d.expectedAppKey || "542618") + " (راجع Cloudflare Variables)"
           : ok
             ? "✅ API الرسمي جاهز — الشحن والتفاصيل تُحمّل تلقائياً عند فتح المنتج"
             : d.configured

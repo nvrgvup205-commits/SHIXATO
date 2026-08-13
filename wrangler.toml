@@ -11,7 +11,7 @@
 #   npx wrangler secret put ALIEXPRESS_APP_SECRET
 #   npx wrangler secret put ALIEXPRESS_ACCESS_TOKEN   # optional after OAuth
 #
-# App Key (542818) is set in [vars] below — do NOT also add it as a Secret.
+# App Key (542618) is set in [vars] below — do NOT also add it as a Secret.
 # Each `wrangler deploy` overwrites dashboard Text vars from this file.
 #
 # Do NOT use [secrets].required — Workers Builds fails the whole deploy
@@ -35,9 +35,9 @@ DASHBOARD_PIN = "1111"
 DEFAULT_MARKUP = "1.4"
 # Max images to push to Shopify per product
 MAX_PRODUCT_IMAGES = "8"
-# AliExpress Open Platform — AppKey 542818 (Shixato). Must match AliExpress Console.
+# AliExpress Open Platform — AppKey 542618 (Shixato). Must match AliExpress Console.
 # Do not change unless you create a new app in AliExpress Console.
-ALIEXPRESS_APP_KEY = "542818"
+ALIEXPRESS_APP_KEY = "542618"
 ALIEXPRESS_CALLBACK_URL = "https://shixato.nvrgvup205.workers.dev/api/aliexpress/callback"
 
 # Workers AI — product analysis in dashboard (enable in Cloudflare dashboard)

@@ -6,11 +6,11 @@ import {
 
 describe("SHIXATO AliExpress App Key", () => {
   it("is fixed to the Shixato console app", () => {
-    expect(SHIXATO_ALIEXPRESS_APP_KEY).toBe("542818");
+    expect(SHIXATO_ALIEXPRESS_APP_KEY).toBe("542618");
   });
 
   it("rejects wrong keys", () => {
-    expect(isExpectedAliExpressAppKey("542818")).toBe(true);
+    expect(isExpectedAliExpressAppKey("542618")).toBe(true);
     expect(isExpectedAliExpressAppKey("999999")).toBe(false);
     expect(isExpectedAliExpressAppKey("")).toBe(false);
   });

@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { AliExpressApi, __testables } from "./aliexpress-api";
 
 const CREDS = {
-  appKey: "542818",
+  appKey: "542618",
   appSecret: "test-secret",
   callbackUrl: "https://example.com/callback",
   accessToken: "test-session-token",

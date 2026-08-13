@@ -84,7 +84,7 @@ npx wrangler secret put SUPABASE_SERVICE_ROLE_KEY
 npx wrangler secret put API_KEY
 # optional:
 npx wrangler secret put OPENAI_API_KEY
-# AliExpress Open Platform (Shixato app — AppKey 542818 in wrangler.toml [vars]):
+# AliExpress Open Platform (Shixato app — AppKey 542618 in wrangler.toml [vars]):
 npx wrangler secret put ALIEXPRESS_APP_SECRET
 # optional after OAuth:
 npx wrangler secret put ALIEXPRESS_ACCESS_TOKEN
@@ -94,7 +94,7 @@ npx wrangler secret put ALIEXPRESS_ACCESS_TOKEN
 
 | Name | Value |
 |------|-------|
-| `ALIEXPRESS_APP_KEY` | `542818` (also in `wrangler.toml`) |
+| `ALIEXPRESS_APP_KEY` | `542618` (also in `wrangler.toml`) |
 | `ALIEXPRESS_CALLBACK_URL` | `https://shixato.nvrgvup205.workers.dev/api/aliexpress/callback` |
 
 **Cloudflare Secret:**
