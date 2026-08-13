@@ -2,13 +2,16 @@ import { getCookie } from "hono/cookie";
 import { Hono } from "hono";
 import { AliExpressApiClient } from "../services/aliexpress-api";
 import {
+  getAliExpressCredentialStatus,
   hasAliExpressAppCredentials,
   loadAliExpressCredentials,
   resolveAliExpressCallbackUrl,
+  saveAliExpressAppCredentials,
   saveAliExpressTokens,
 } from "../services/aliexpress-credentials";
 import { SupabaseService } from "../services/supabase";
 import type { Env } from "../types";
+import { requireApiKey } from "../utils/auth";
 import {
   clearSessionCookie,
   isValidDashboardPin,
@@ -148,11 +151,20 @@ auth.get("/ping", requireAuth, (c) => c.json({ ok: true, data: { pong: true } })
 
 /** AliExpress OAuth — start authorization */
 auth.get("/aliexpress/connect", async (c) => {
-  if (!hasAliExpressAppCredentials(c.env)) {
+  const configured = await hasAliExpressAppCredentials(c.env);
+  if (!configured) {
+    const status = await getAliExpressCredentialStatus(c.env);
     return c.html(
-      `<!doctype html><html lang="ar" dir="rtl"><body style="font-family:sans-serif;padding:2rem">
-        <h1>AliExpress غير مضبوط</h1>
-        <p>أضف <code>ALIEXPRESS_APP_KEY</code> و <code>ALIEXPRESS_APP_SECRET</code> في Cloudflare Secrets.</p>
+      `<!doctype html><html lang="ar" dir="rtl"><body style="font-family:sans-serif;padding:2rem;max-width:720px;line-height:1.6">
+        <h1>AliExpress — محتاج App Secret</h1>
+        <p>AppKey موجود، لكن <strong>App Secret</strong> مش واصل للسيرفر.</p>
+        <p>الحل الأسرع: افتح <strong>Supabase → SQL Editor</strong> والصق:</p>
+        <pre style="background:#f4f4f4;padding:1rem;overflow:auto;direction:ltr;text-align:left">INSERT INTO shixato.app_settings (key, value) VALUES
+  ('aliexpress_app_key', '542818'),
+  ('aliexpress_app_secret', 'ضع_السيكرت_هنا')
+ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW();</pre>
+        <p>بعدها افتح الرابط ده تاني.</p>
+        <p style="color:#666;font-size:14px">تشخيص: env key=${status.hasEnvAppKey}, env secret=${status.hasEnvAppSecret}, supabase key=${status.hasSupabaseAppKey}, supabase secret=${status.hasSupabaseAppSecret}</p>
       </body></html>`,
       500,
     );
@@ -165,6 +177,26 @@ auth.get("/aliexpress/connect", async (c) => {
 
   const client = new AliExpressApiClient(creds);
   return c.redirect(client.buildAuthorizeUrl("shixato"), 302);
+});
+
+/** Save AliExpress app credentials to Supabase (fallback when Cloudflare secrets fail) */
+auth.post("/aliexpress/bootstrap", requireApiKey, async (c) => {
+  const body = (await c.req.json().catch(() => ({}))) as {
+    appKey?: string;
+    appSecret?: string;
+  };
+  const appKey = String(body.appKey ?? c.env.ALIEXPRESS_APP_KEY ?? "").trim();
+  const appSecret = String(body.appSecret ?? "").trim();
+
+  if (!appKey || !appSecret) {
+    return c.json(
+      { ok: false, error: "appKey و appSecret مطلوبان" },
+      400,
+    );
+  }
+
+  await saveAliExpressAppCredentials(c.env, { appKey, appSecret });
+  return c.json({ ok: true, data: { saved: true } });
 });
 
 /** AliExpress OAuth callback — exchange code for access token */
@@ -238,12 +270,12 @@ auth.get("/aliexpress/callback", async (c) => {
 
 /** AliExpress connection status for dashboard troubleshooting */
 auth.get("/aliexpress/status", requireAuth, async (c) => {
-  const configured = hasAliExpressAppCredentials(c.env);
-  const creds = configured ? await loadAliExpressCredentials(c.env) : null;
+  const status = await getAliExpressCredentialStatus(c.env);
+  const creds = status.configured ? await loadAliExpressCredentials(c.env) : null;
   return c.json({
     ok: true,
     data: {
-      configured,
+      ...status,
       callbackUrl: resolveAliExpressCallbackUrl(c.env),
       hasAccessToken: Boolean(creds?.accessToken),
       tokenExpiresAt: creds?.tokenExpiresAt ?? null,
