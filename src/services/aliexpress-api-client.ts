@@ -7,7 +7,7 @@ import { AliExpressApiClient } from "./aliexpress-api";
 import { loadAliExpressCredentials } from "./aliexpress-credentials";
 import { SupabaseService, type CreateSyncLogInput } from "./supabase";
 
-const SYNC_BASE = "https://api-sg.aliexpress.com/sync";
+import { ALIEXPRESS_BUSINESS_REST_BASE } from "../constants/aliexpress";
 const DEFAULT_SHIP_TO = "SA";
 const DEFAULT_CURRENCY = "SAR";
 const DEFAULT_LANGUAGE = "AR";
@@ -208,7 +208,7 @@ export class AliExpressApiClientService {
     await this.audit("aliexpress_api:search", {
       keyword: q,
       category: category ?? null,
-      endpoint: SYNC_BASE,
+      endpoint: ALIEXPRESS_BUSINESS_REST_BASE,
       result_count: mapped.length,
     });
 
@@ -279,7 +279,7 @@ export class AliExpressApiClientService {
 
     await this.audit("aliexpress_api:product_profile", {
       product_id: id,
-      endpoint: SYNC_BASE,
+      endpoint: ALIEXPRESS_BUSINESS_REST_BASE,
       shipping_options: shippingOptions.length,
       sales: product.sales ?? null,
       reviews: product.reviews ?? null,
@@ -331,7 +331,7 @@ export class AliExpressApiClientService {
     await this.audit("aliexpress_api:shipping", {
       product_id: productId.trim(),
       quantity,
-      endpoint: SYNC_BASE,
+      endpoint: ALIEXPRESS_BUSINESS_REST_BASE,
       service: quote.serviceName,
       amount: quote.amount,
     });

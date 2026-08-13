@@ -14,6 +14,10 @@ import { SupabaseService } from "../services/supabase";
 import type { Env } from "../types";
 import { requireAuth } from "../utils/session";
 import { HttpError } from "../utils/http";
+import {
+  isAliExpressAuthError,
+  isAliExpressSignatureError,
+} from "../utils/aliexpress-api-error";
 
 const OAUTH_STATE_COOKIE = "ae_oauth_state";
 const STATE_MAX_AGE_SEC = 600;
@@ -219,21 +223,37 @@ aliexpressAuth.get("/aliexpress/test", requireAuth, async (c) => {
     callbackUrl: creds.callbackUrl,
   });
 
-  const check = await oauth.validateToken(creds.accessToken, {
-    expiresAt: creds.tokenExpiresAt,
-  });
+  let accessToken = creds.accessToken;
+  let expiresAt = creds.tokenExpiresAt;
+  let refreshed = false;
 
-  const signatureError = /signature|IncompleteSignature|platform standards/i.test(
-    check.error ?? "",
-  );
-  const tokenError = /access token|IllegalAccessToken|invalid or expired/i.test(
-    check.error ?? "",
-  );
+  let check = await oauth.validateToken(accessToken, { expiresAt });
+
+  if (!check.valid && creds.refreshToken) {
+    try {
+      const next = await oauth.refreshAccessToken(creds.refreshToken);
+      accessToken = next.accessToken;
+      expiresAt = next.expiresAt;
+      refreshed = true;
+      await saveAliExpressTokens(c.env, {
+        accessToken: next.accessToken,
+        refreshToken: next.refreshToken,
+        expiresAt: next.expiresAt,
+      });
+      check = await oauth.validateToken(accessToken, { expiresAt });
+    } catch {
+      // keep original check result
+    }
+  }
+
+  const signatureError = isAliExpressSignatureError(check.error ?? "");
+  const tokenError = isAliExpressAuthError(check.error ?? "");
 
   return c.json({
     ok: check.valid,
     data: {
       valid: check.valid,
+      refreshed,
       error: check.error ?? null,
       errorKind: check.valid
         ? "ok"
@@ -244,15 +264,32 @@ aliexpressAuth.get("/aliexpress/test", requireAuth, async (c) => {
             : "unknown",
       appKey: creds.appKey,
       secretLength: creds.appSecret.length,
-      tokenPreview: creds.accessToken.slice(0, 8) + "…",
-      expiresAt: creds.tokenExpiresAt,
+      tokenPreview: accessToken.slice(0, 8) + "…",
+      tokenLength: accessToken.length,
+      expiresAt,
       hintAr: signatureError
-        ? "App Secret في Cloudflare لا يطابق Console — أعد لصقه (البصمة المطلوبة: df536a0b324c)"
+        ? "توقيع DS API فشل — تأكد أن App Secret صحيح ثم أعد OAuth"
         : tokenError
-          ? "App Secret صحيح — Access Token منتهي. اعمل OAuth من جديد (لا تلصق App Secret في خانة التوكن)"
+          ? "App Secret صحيح — Access Token منتهي أو تالف. امسح التوكن واعمل OAuth من جديد"
           : check.valid
-            ? null
+            ? refreshed
+              ? "تم تجديد التوكن تلقائياً ✅"
+              : null
             : check.error ?? "فشل التحقق",
+    },
+  });
+});
+
+/** مسح Access Token المحفوظ (لإعادة OAuth من الصفر) */
+aliexpressAuth.delete("/aliexpress/token", requireAuth, async (c) => {
+  const db = new SupabaseService(c.env);
+  await db.clearAliExpressToken();
+  return c.json({
+    ok: true,
+    data: {
+      cleared: true,
+      message_ar: "تم مسح التوكن — افتح ربط OAuth من جديد",
+      connectUrl: "/api/auth/aliexpress/connect",
     },
   });
 });
@@ -281,28 +318,31 @@ aliexpressAuth.get("/aliexpress/credentials-check", requireAuth, async (c) => {
   });
 
   const secretProbe = await oauth.probeAppSecret();
+  const businessProbe = await oauth.probeBusinessSignature();
+  const signatureOk = secretProbe.signatureOk && businessProbe.signatureOk;
   const probe = creds.accessToken
     ? await oauth.validateToken(creds.accessToken, { expiresAt: creds.tokenExpiresAt })
     : { valid: false, error: "no_token" };
 
-  const signatureError =
-    !secretProbe.signatureOk ||
-    /signature|IncompleteSignature|platform standards/i.test(probe.error ?? "");
-
   return c.json({
-    ok: secretProbe.signatureOk && (probe.valid || !creds.accessToken),
+    ok: signatureOk && (probe.valid || !creds.accessToken),
     data: {
       ...status,
-      signatureOk: secretProbe.signatureOk,
+      signatureOk,
+      businessSignatureOk: businessProbe.signatureOk,
       tokenValid: probe.valid,
-      probeError: secretProbe.error ?? probe.error ?? null,
-      hintAr: !secretProbe.signatureOk
-        ? "التوقيع فشل — App Secret لا يطابق AppKey 542618. الصق Secret من Console في Cloudflare ثم Deploy."
+      probeError:
+        secretProbe.error ??
+        businessProbe.error ??
+        probe.error ??
+        null,
+      hintAr: !signatureOk
+        ? "التوقيع فشل — App Secret لا يطابق AppKey 542618"
         : !creds.accessToken
           ? "App Secret صحيح ✅ — اعمل OAuth للحصول على Access Token"
           : probe.valid
             ? "كل شيء يعمل ✅"
-            : "App Secret صحيح — Access Token منتهي. اعمل OAuth من جديد",
+            : "App Secret صحيح — Access Token تالف. امسحه واعمل OAuth من جديد",
     },
   });
 });

@@ -603,6 +603,7 @@ export function renderDashboardPage(storeDomain: string): string {
           <a class="btn btn-accent" id="aeConnectBtn" href="/api/auth/aliexpress/connect" target="_blank" rel="noopener" style="text-decoration:none">ربط OAuth (محاولة)</a>
           <button class="btn btn-ghost" id="aeRefreshStatusBtn" type="button">تحديث الحالة</button>
           <button class="btn btn-ghost" id="aeTestApiBtn" type="button">اختبار API</button>
+          <button class="btn btn-ghost" id="aeClearTokenBtn" type="button">مسح التوكن</button>
         </div>
         <label for="aeAccessToken">أو الصق Access Token يدوياً (من API Testing Tool)</label>
         <textarea id="aeAccessToken" rows="3" placeholder="الصق access_token هنا…" style="width:100%;margin-top:.35rem;font-family:monospace;font-size:.85rem"></textarea>
@@ -1537,6 +1538,16 @@ export function renderDashboardPage(storeDomain: string): string {
     }
 
     $("aeRefreshStatusBtn").onclick = loadAliExpressStatus;
+    $("aeClearTokenBtn").onclick = async () => {
+      if (!confirm("مسح Access Token المحفوظ؟ ستحتاج OAuth من جديد.")) return;
+      try {
+        await api("/api/auth/aliexpress/token", { method: "DELETE" });
+        toast("تم مسح التوكن — اضغط ربط OAuth");
+        loadAliExpressStatus();
+      } catch (e) {
+        toast(e.message || "فشل مسح التوكن", true);
+      }
+    };
     $("aeTestApiBtn").onclick = async () => {
       try {
         const res = await fetch("/api/auth/aliexpress/test", {
@@ -1547,7 +1558,7 @@ export function renderDashboardPage(storeDomain: string): string {
         if (body.data && body.data.valid) {
           toast("✅ API يعمل — التوكن صالح");
         } else if (body.data?.errorKind === "bad_app_secret" || /signature|platform standards/i.test(body.data?.error || "")) {
-          toast("❌ App Secret غلط — انسخه من AliExpress Console → Cloudflare Secret", true);
+          toast("❌ مشكلة توقيع API — راجع App Secret ثم أعد OAuth", true);
           if (body.data?.hintAr) setTimeout(() => toast(body.data.hintAr, true), 500);
         } else {
           toast("❌ " + (body.data?.error || body.error || "التوكن غير صالح — اعمل OAuth من جديد"), true);

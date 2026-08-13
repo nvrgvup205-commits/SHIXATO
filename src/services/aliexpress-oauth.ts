@@ -1,4 +1,10 @@
 import { signAliExpressRequest } from "../utils/aliexpress-sign";
+import { ALIEXPRESS_BUSINESS_REST_BASE } from "../constants/aliexpress";
+import {
+  extractAliExpressApiError,
+  isAliExpressSignatureError,
+  isAliExpressAuthError,
+} from "../utils/aliexpress-api-error";
 import { fetchWithTimeout, HttpError } from "../utils/http";
 import { sleep } from "../utils/rate-limiter";
 
@@ -112,6 +118,35 @@ export class AliExpressOAuth {
     }
   }
 
+  /** DS feed probe without access token — verifies AppKey+Secret on /rest. */
+  async probeBusinessSignature(): Promise<{ signatureOk: boolean; error?: string }> {
+    try {
+      await this.postSignedBusiness(
+        "aliexpress.ds.recommend.feed.get",
+        {
+          feed_name: "DS bestseller",
+          country: "SA",
+          target_currency: "USD",
+          target_language: "EN",
+          page_size: "1",
+        },
+        null,
+      );
+      return { signatureOk: true };
+    } catch (err) {
+      const msg =
+        err instanceof HttpError
+          ? err.message
+          : err instanceof Error
+            ? err.message
+            : "فشل فحص التوقيع";
+      if (isAliExpressSignatureError(msg)) {
+        return { signatureOk: false, error: msg };
+      }
+      return { signatureOk: true };
+    }
+  }
+
   /**
    * 4) التحقق من صلاحية التوكن.
    * - يتحقق من الشكل والانتهاء المحلي
@@ -131,17 +166,11 @@ export class AliExpressOAuth {
       }
     }
 
-    const probes: Array<{ method: string; params: Record<string, string> }> = [
-      {
-        method: "aliexpress.ds.recommend.feed.get",
-        params: {
-          feed_name: "DS bestseller",
-          country: "SA",
-          target_currency: "USD",
-          target_language: "EN",
-          page_size: "1",
-        },
-      },
+    const probes: Array<{
+      method: string;
+      params: Record<string, string>;
+      accessToken: string;
+    }> = [
       {
         method: "aliexpress.ds.product.get",
         params: {
@@ -150,6 +179,7 @@ export class AliExpressOAuth {
           target_currency: "USD",
           target_language: "EN",
         },
+        accessToken: token,
       },
     ];
 
@@ -157,12 +187,18 @@ export class AliExpressOAuth {
     for (const probe of probes) {
       try {
         await this.withRetry(() =>
-          this.postSignedSync(probe.method, probe.params, token),
+          this.postSignedBusiness(probe.method, probe.params, probe.accessToken),
         );
         return { valid: true };
       } catch (err) {
         lastError =
           err instanceof HttpError ? err.message : "فشل التحقق من التوكن";
+        if (isAliExpressSignatureError(lastError)) {
+          return { valid: false, error: lastError };
+        }
+        if (!isAliExpressAuthError(lastError)) {
+          return { valid: true };
+        }
       }
     }
 
@@ -264,10 +300,10 @@ export class AliExpressOAuth {
     return json;
   }
 
-  private async postSignedSync(
+  private async postSignedBusiness(
     method: string,
     apiParams: Record<string, string>,
-    accessToken: string,
+    accessToken: string | null,
   ): Promise<Record<string, unknown>> {
     const timestamp = String(Date.now());
     const params: Record<string, string> = {
@@ -275,13 +311,15 @@ export class AliExpressOAuth {
       timestamp,
       sign_method: "sha256",
       method,
-      session: accessToken,
       ...apiParams,
     };
+    if (accessToken) {
+      params.access_token = accessToken;
+    }
     params.sign = await signAliExpressRequest(method, params, this.config.appSecret);
 
     const body = new URLSearchParams(params);
-    const res = await fetchWithTimeout("https://api-sg.aliexpress.com/sync", {
+    const res = await fetchWithTimeout(ALIEXPRESS_BUSINESS_REST_BASE, {
       method: "POST",
       headers: {
         "Content-Type": "application/x-www-form-urlencoded;charset=utf-8",
@@ -290,43 +328,70 @@ export class AliExpressOAuth {
     });
 
     const json = (await res.json().catch(() => ({}))) as Record<string, unknown>;
-    const error = json.error_response as
-      | { msg?: string; sub_msg?: string; code?: number }
-      | undefined;
+    const error = extractAliExpressApiError(json);
 
     if (!res.ok || error) {
-      throw new HttpError(
-        502,
-        error?.sub_msg || error?.msg || "AliExpress API رفض التوكن",
-        json,
-      );
+      const msg = error?.sub_msg || error?.msg || "AliExpress API رفض التوكن";
+      throw new HttpError(502, msg, json);
     }
 
     return json;
   }
 
   private normalizeTokenResponse(raw: AliExpressTokenApiResponse): AliExpressOAuthToken {
-    const accessToken = raw.access_token?.trim();
+    const payload = unwrapAliExpressTokenPayload(raw);
+    const accessToken = sanitizeAccessToken(payload.access_token);
     if (!accessToken) {
-      throw new HttpError(502, "AliExpress لم يُرجع access_token", raw);
+      throw new HttpError(502, "AliExpress لم يُرجع access_token", payload);
     }
 
-    const expiresAt = resolveTokenExpiry(raw);
+    const expiresAt = resolveTokenExpiry(payload);
 
     return {
       accessToken,
-      refreshToken: raw.refresh_token?.trim() || null,
+      refreshToken: payload.refresh_token?.trim() || null,
       expiresAt,
-      raw,
+      raw: payload,
     };
   }
 }
 
+export function unwrapAliExpressTokenPayload(
+  raw: AliExpressTokenApiResponse & { gopResponseBody?: string },
+): AliExpressTokenApiResponse {
+  if (raw.access_token?.trim()) return raw;
+  const body = raw.gopResponseBody;
+  if (typeof body === "string" && body.trim()) {
+    try {
+      return JSON.parse(body) as AliExpressTokenApiResponse;
+    } catch {
+      // fall through
+    }
+  }
+  return raw;
+}
+
+export function sanitizeAccessToken(value: string | undefined): string | null {
+  if (!value) return null;
+  const cleaned = value.replace(/[^\x20-\x7E]/g, "").trim();
+  return cleaned || null;
+}
+
 export function resolveTokenExpiry(raw: AliExpressTokenApiResponse): string | null {
   if (raw.expire_time != null) {
-    const ms = Number(raw.expire_time);
-    if (Number.isFinite(ms) && ms > 0) {
+    const asNumber = Number(raw.expire_time);
+    if (Number.isFinite(asNumber) && asNumber > 0) {
+      const ms =
+        asNumber > 1_000_000_000_000
+          ? asNumber
+          : asNumber > 1_000_000_000
+            ? asNumber * 1000
+            : asNumber;
       return new Date(ms).toISOString();
+    }
+    const parsed = Date.parse(String(raw.expire_time).trim().replace(" ", "T"));
+    if (Number.isFinite(parsed)) {
+      return new Date(parsed).toISOString();
     }
   }
   if (raw.expires_in != null) {
