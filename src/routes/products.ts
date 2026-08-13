@@ -1,4 +1,6 @@
 import { Hono } from "hono";
+import { AliExpressApiClient } from "../services/aliexpress-api";
+import { loadAliExpressCredentials } from "../services/aliexpress-credentials";
 import { AliExpressService } from "../services/aliexpress";
 import { ImportPipeline } from "../services/pipeline";
 import type { Env, ImportProductInput, ProductSearchFilters, ProductStatus } from "../types";
@@ -33,6 +35,52 @@ products.post("/search", requireAuth, async (c) => {
   try {
     const data = await new AliExpressService().search(body);
     return c.json({ ok: true, data });
+  } catch (err) {
+    if (err instanceof HttpError) {
+      return c.json(
+        { ok: false, error: err.message, details: err.details ?? null },
+        err.status as 400 | 401 | 500 | 502,
+      );
+    }
+    throw err;
+  }
+});
+
+/** Official AliExpress freight quote (requires OAuth access token) */
+products.post("/freight", requireAuth, async (c) => {
+  const body = (await c.req.json().catch(() => ({}))) as {
+    productId?: string;
+    aliexpressId?: string;
+    quantity?: number;
+    shipToCountry?: string;
+    price?: string;
+  };
+
+  const productId = String(body.productId ?? body.aliexpressId ?? "").trim();
+  if (!productId) {
+    return c.json({ ok: false, error: "productId مطلوب" }, 400);
+  }
+
+  const creds = await loadAliExpressCredentials(c.env);
+  if (!creds) {
+    return c.json(
+      {
+        ok: false,
+        error: "AliExpress API غير مضبوط — أضف AppKey و AppSecret في Secrets",
+      },
+      500,
+    );
+  }
+
+  try {
+    const client = new AliExpressApiClient(creds);
+    const options = await client.calculateFreight({
+      productId,
+      quantity: body.quantity,
+      shipToCountry: body.shipToCountry,
+      price: body.price,
+    });
+    return c.json({ ok: true, data: { productId, options } });
   } catch (err) {
     if (err instanceof HttpError) {
       return c.json(

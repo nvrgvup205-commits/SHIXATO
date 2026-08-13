@@ -8,6 +8,9 @@
 #   npx wrangler secret put SUPABASE_SERVICE_ROLE_KEY
 #   npx wrangler secret put API_KEY
 #   npx wrangler secret put OPENAI_API_KEY   # optional AI filter
+#   npx wrangler secret put ALIEXPRESS_APP_KEY
+#   npx wrangler secret put ALIEXPRESS_APP_SECRET
+#   npx wrangler secret put ALIEXPRESS_ACCESS_TOKEN   # optional after OAuth
 #
 # Do NOT use [secrets].required — Workers Builds fails the whole deploy
 # when required secrets are missing. Set secrets after the first deploy.
