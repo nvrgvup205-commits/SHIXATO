@@ -212,6 +212,27 @@ export function renderDashboardPage(storeDomain: string): string {
       color: #f7faf7;
     }
     .auto-discover-banner p { margin: .25rem 0 0; font-size: .88rem; opacity: .92; }
+    .turbo-head {
+      display: flex; flex-wrap: wrap; gap: .6rem; align-items: center; justify-content: space-between;
+    }
+    .turbo-stats {
+      display: flex; flex-wrap: wrap; gap: .45rem; align-items: center; margin-top: .7rem;
+      padding-top: .65rem; border-top: 1px solid rgba(255,255,255,.18);
+    }
+    .turbo-toggle {
+      display: inline-flex; align-items: center; gap: .4rem;
+      font-size: .86rem; font-weight: 700; cursor: pointer; margin-inline-end: .25rem;
+    }
+    .turbo-toggle input { width: auto; accent-color: #e8ff57; }
+    .turbo-chip {
+      display: inline-flex; align-items: center; gap: .25rem;
+      padding: .28rem .62rem; border-radius: 999px;
+      background: rgba(255,255,255,.14); border: 1px solid rgba(255,255,255,.22);
+      font-size: .8rem; font-weight: 600; white-space: nowrap;
+    }
+    .turbo-chip b { font-size: .95rem; color: #e8ff57; }
+    .turbo-chip.accent { background: rgba(232,255,87,.18); border-color: rgba(232,255,87,.35); }
+    .turbo-chip.off { opacity: .45; }
     .search-topbar {
       display: flex; gap: .5rem; flex-wrap: wrap; align-items: center;
       position: sticky; top: 0; z-index: 5; padding: .65rem;
@@ -326,17 +347,22 @@ export function renderDashboardPage(storeDomain: string): string {
 
       <section id="tab-search" class="panel">
         <div class="auto-discover-banner">
-          <div style="display:flex;flex-wrap:wrap;gap:.6rem;align-items:center;justify-content:space-between">
+          <div class="turbo-head">
             <div>
-              <strong style="font-size:1.05rem">⚡ اكتشاف تلقائي مبهر (توربو)</strong>
-              <p>20 كلمة ترندية بالAI · 6 صفحات لكل كلمة · منتجات تحل مشاكل حقيقية · بيانات كاملة للتحليل</p>
+              <strong style="font-size:1.05rem">⚡ اكتشاف تلقائي — وضع توربو</strong>
+              <p>بحث عميق بكلمات ترندية + منتجات تحل مشاكل + بيانات كاملة للتحليل</p>
             </div>
-            <div style="display:flex;flex-wrap:wrap;gap:.5rem;align-items:center">
-              <label class="check" style="font-size:.85rem;opacity:.95">
-                <input id="turboDiscover" type="checkbox" checked /> توربو (20 كلمة × 6 صفحات)
-              </label>
-              <button class="btn btn-auto-discover" id="autoDiscoverBtn" type="button">ابدأ الاكتشاف (3–5 دقائق)</button>
-            </div>
+            <button class="btn btn-auto-discover" id="autoDiscoverBtn" type="button">ابدأ الاكتشاف (3–5 دقائق)</button>
+          </div>
+          <div class="turbo-stats">
+            <label class="turbo-toggle" for="turboDiscover">
+              <input id="turboDiscover" type="checkbox" checked />
+              <span>تفعيل التوربو</span>
+            </label>
+            <span class="turbo-chip" id="turboChipKeywords"><b>20</b> كلمة بحث</span>
+            <span class="turbo-chip" id="turboChipPages"><b>6</b> صفحات لكل كلمة</span>
+            <span class="turbo-chip" id="turboChipTotal">≈ <b>120</b> صفحة إجمالاً</span>
+            <span class="turbo-chip accent" id="turboChipFocus">تحل مشاكل ✅</span>
           </div>
         </div>
         <div class="search-topbar">
@@ -1144,6 +1170,21 @@ export function renderDashboardPage(storeDomain: string): string {
       $("filterActions").classList.toggle("hidden", !rejected.length && !state.lastSearch?.resultsBeforeFilter);
     }
 
+    function updateTurboChips() {
+      const turbo = $("turboDiscover").checked;
+      const kw = turbo ? 20 : 15;
+      const pages = turbo ? 6 : 3;
+      const total = kw * pages;
+      $("turboChipKeywords").innerHTML = "<b>" + kw + "</b> كلمة بحث";
+      $("turboChipPages").innerHTML = "<b>" + pages + "</b> صفحات لكل كلمة";
+      $("turboChipTotal").innerHTML = "≈ <b>" + total + "</b> صفحة إجمالاً";
+      $("turboChipFocus").classList.toggle("off", !turbo);
+      $("turboChipFocus").textContent = turbo ? "تحل مشاكل ✅" : "بحث عادي";
+      $("autoDiscoverBtn").textContent = turbo
+        ? "ابدأ الاكتشاف (3–5 دقائق)"
+        : "ابدأ الاكتشاف (1–2 دقيقة)";
+    }
+
     async function runAutoDiscover() {
       const category = $("category").value;
       if (!category) {
@@ -1411,6 +1452,8 @@ export function renderDashboardPage(storeDomain: string): string {
     }
     $("searchBtn").onclick = runSearch;
     $("autoDiscoverBtn").onclick = runAutoDiscover;
+    $("turboDiscover").onchange = updateTurboChips;
+    updateTurboChips();
     $("query").addEventListener("keydown", (e) => { if (e.key === "Enter") runSearch(); });
 
     $("showRejectedDiscoverBtn").onclick = () => {
@@ -1487,11 +1530,15 @@ export function renderDashboardPage(storeDomain: string): string {
     $("aeRefreshStatusBtn").onclick = loadAliExpressStatus;
     $("aeTestApiBtn").onclick = async () => {
       try {
-        const res = await api("/api/auth/aliexpress/test");
-        if (res.data && res.data.valid) {
+        const res = await fetch("/api/auth/aliexpress/test", {
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+        });
+        const body = await res.json().catch(() => ({}));
+        if (body.data && body.data.valid) {
           toast("✅ API يعمل — التوكن صالح");
         } else {
-          toast("❌ " + (res.data?.error || "التوكن غير صالح"), true);
+          toast("❌ " + (body.data?.error || body.error || "التوكن غير صالح"), true);
         }
         loadAliExpressStatus();
       } catch (e) {
