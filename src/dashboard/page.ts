@@ -563,6 +563,29 @@ export function renderDashboardPage(storeDomain: string): string {
           <a class="btn btn-ghost" href="https://${store}/admin" target="_blank" rel="noopener" style="text-decoration:none">لوحة Shopify Admin</a>
         </div>
 
+        <hr style="border:none;border-top:1px solid var(--line);margin:1.25rem 0" />
+
+        <h3 style="margin:0 0 .5rem;font-family:var(--display)">ربط AliExpress API</h3>
+        <p class="hint" id="aeStatusHint">جاري التحقق من حالة الربط…</p>
+        <div id="aeStatusBox" class="hint" style="margin:.5rem 0;padding:.75rem;border:1px solid var(--line);border-radius:12px;background:rgba(255,255,255,.5)"></div>
+        <div style="display:flex;gap:.55rem;flex-wrap:wrap;margin:.75rem 0">
+          <a class="btn btn-accent" id="aeConnectBtn" href="/api/auth/aliexpress/connect" target="_blank" rel="noopener" style="text-decoration:none">ربط OAuth (محاولة)</a>
+          <button class="btn btn-ghost" id="aeRefreshStatusBtn" type="button">تحديث الحالة</button>
+        </div>
+        <label for="aeAccessToken">أو الصق Access Token يدوياً (من API Testing Tool)</label>
+        <textarea id="aeAccessToken" rows="3" placeholder="الصق access_token هنا…" style="width:100%;margin-top:.35rem;font-family:monospace;font-size:.85rem"></textarea>
+        <div style="display:flex;gap:.55rem;flex-wrap:wrap;margin-top:.65rem">
+          <button class="btn btn-primary" id="aeSaveTokenBtn" type="button">حفظ التوكن</button>
+        </div>
+        <p class="hint" style="margin-top:.75rem">
+          روابط مفيدة:
+          <a href="https://openservice.aliexpress.com/app/list" target="_blank" rel="noopener">تطبيقات AliExpress</a> ·
+          <a href="https://openservice.aliexpress.com/doc/doc.htm" target="_blank" rel="noopener">التوثيق</a> ·
+          <a href="https://ds.aliexpress.com/" target="_blank" rel="noopener">DS Center</a>
+        </p>
+
+        <hr style="border:none;border-top:1px solid var(--line);margin:1.25rem 0" />
+
         <h3 style="margin:0 0 .5rem;font-family:var(--display)">تغيير الرقم السري</h3>
         <div class="filters">
           <div>
@@ -657,6 +680,14 @@ export function renderDashboardPage(storeDomain: string): string {
     function showApp(on) {
       $("gate").classList.toggle("hidden", on);
       $("app").classList.toggle("hidden", !on);
+      if (on) {
+        loadAliExpressStatus().catch(() => {});
+        const params = new URLSearchParams(location.search);
+        if (params.get("aliexpress") === "connected") {
+          toast("تم ربط AliExpress بنجاح ✅");
+          history.replaceState({}, "", location.pathname);
+        }
+      }
     }
 
     function escapeHtml(s) {
@@ -735,6 +766,7 @@ export function renderDashboardPage(storeDomain: string): string {
         if (btn.dataset.tab === "catalog") loadCatalog();
         if (btn.dataset.tab === "logs") loadLogs();
         if (btn.dataset.tab === "favorites") loadFavorites();
+        if (btn.dataset.tab === "settings") loadAliExpressStatus();
       });
     });
 
@@ -1413,6 +1445,47 @@ export function renderDashboardPage(storeDomain: string): string {
       toast("تم مسح الفلاتر المحلية — اضغط بحث مرة أخرى");
     };
 
+    async function loadAliExpressStatus() {
+      const hint = $("aeStatusHint");
+      const box = $("aeStatusBox");
+      if (!hint || !box) return;
+      try {
+        const res = await api("/api/auth/aliexpress/status");
+        const d = res.data || {};
+        const ok = d.hasAccessToken;
+        hint.textContent = ok
+          ? "✅ API الرسمي جاهز — الشحن والتفاصيل تُحمّل تلقائياً عند فتح المنتج"
+          : d.configured
+            ? "⚠️ AppKey موجود — تحتاج Access Token (OAuth أو لصق يدوي)"
+            : "❌ أضف App Secret في Cloudflare Secrets أولاً";
+        box.innerHTML =
+          "<div><strong>AppKey:</strong> " + escapeHtml(String(d.appKey || "—")) + "</div>" +
+          "<div><strong>Token:</strong> " + (ok ? "موجود ✅" : "مفقود ❌") + "</div>" +
+          (d.tokenExpiresAt ? "<div><strong>ينتهي:</strong> " + escapeHtml(d.tokenExpiresAt) + "</div>" : "") +
+          "<div><strong>Callback:</strong> <code style='font-size:.8rem'>" + escapeHtml(d.callbackUrl || "") + "</code></div>";
+      } catch (e) {
+        hint.textContent = "تعذّر قراءة حالة AliExpress";
+        box.textContent = e.message || "";
+      }
+    }
+
+    $("aeRefreshStatusBtn").onclick = loadAliExpressStatus;
+    $("aeSaveTokenBtn").onclick = async () => {
+      const token = ($("aeAccessToken").value || "").trim();
+      if (!token) return toast("الصق access token أولاً", true);
+      try {
+        const res = await api("/api/auth/aliexpress/token", {
+          method: "POST",
+          body: JSON.stringify({ accessToken: token }),
+        });
+        $("aeAccessToken").value = "";
+        toast((res.data && res.data.message_ar) || "تم حفظ التوكن");
+        loadAliExpressStatus();
+      } catch (e) {
+        toast(e.message || "فشل حفظ التوكن", true);
+      }
+    };
+
     $("changePinBtn").onclick = async () => {
       const currentPin = $("currentPin").value.trim();
       const newPin = $("newPin").value.trim();
@@ -1451,6 +1524,47 @@ export function renderDashboardPage(storeDomain: string): string {
       });
     }
 
+    async function enrichDrawerFromApi(item) {
+      if (!item || !item.aliexpressId) return;
+      try {
+        const res = await api("/api/products/profile/" + encodeURIComponent(item.aliexpressId));
+        const d = res.data || {};
+        const ship = d.shippingToSaudi || d.shipping;
+        if (d.sales != null && !item.soldCount) {
+          item.soldCount = d.sales;
+          $("dSold").textContent = String(d.sales);
+        }
+        if (d.reviews != null && item.reviewCount == null) {
+          item.reviewCount = d.reviews;
+          $("dReviews").textContent = String(d.reviews);
+        }
+        if (d.rating != null && item.rating == null) {
+          item.rating = d.rating;
+          $("dRating").textContent = "★ " + d.rating;
+        }
+        if (ship) {
+          const days = ship.estimatedDeliveryDays || ship.estimated_delivery_days;
+          const cost = ship.amount != null ? ship.amount : ship.cost;
+          const cur = ship.currency || "SAR";
+          if (days) {
+            item.deliveryEstimate = days;
+            $("dDelivery").textContent = formatDeliveryText(days);
+          }
+          if (cost != null) {
+            item.shippingCost = cost;
+            item.shippingCostCurrency = cur;
+            $("dShip").textContent = cost === 0 ? "شحن مجاني" : (cost + " " + cur);
+          }
+          $("dShipDetail").textContent =
+            (ship.serviceName || ship.service_name || "شحن") +
+            (days ? " · " + formatDeliveryText(days) : "") +
+            " · مصدر: API رسمي ✅";
+        }
+      } catch (_) {
+        /* scraping data كافية بدون token */
+      }
+    }
+
     function openDrawer(item) {
       state.listing = item;
       const imgs = (item.images && item.images.length)
@@ -1477,6 +1591,7 @@ export function renderDashboardPage(storeDomain: string): string {
       $("dSell").value = "";
       $("openAe").href = aeProductUrl(item);
       $("dHint").textContent = "1) اضغط 🤖 للتحليل  2) ثم ⭐ للمفضلة بالعنوان السعودي · ID: " + item.aliexpressId;
+      enrichDrawerFromApi(item);
       state.lastAiAnalysis = null;
       $("dAiPanel").classList.add("hidden");
       $("dAiPanel").innerHTML = "";

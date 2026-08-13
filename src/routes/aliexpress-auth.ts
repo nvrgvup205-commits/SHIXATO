@@ -7,6 +7,7 @@ import {
   hasAliExpressAppCredentials,
   loadAliExpressCredentials,
   resolveAliExpressCallbackUrl,
+  saveAliExpressTokens,
 } from "../services/aliexpress-credentials";
 import { AliExpressOAuth } from "../services/aliexpress-oauth";
 import { SupabaseService } from "../services/supabase";
@@ -78,6 +79,7 @@ aliexpressAuth.get("/aliexpress/status", requireAuth, async (c) => {
   const creds = status.configured ? await loadAliExpressCredentials(c.env) : null;
   const db = new SupabaseService(c.env);
   const tokenRow = await db.getAliExpressToken().catch(() => null);
+  const workerOrigin = new URL(c.req.url).origin;
 
   return c.json({
     ok: true,
@@ -88,6 +90,77 @@ aliexpressAuth.get("/aliexpress/status", requireAuth, async (c) => {
       tokenExpiresAt: creds?.tokenExpiresAt ?? tokenRow?.expires_at ?? null,
       connectUrl: "/api/auth/aliexpress/connect",
       appKey: creds?.appKey ?? null,
+      mode: creds?.accessToken ? "api_ready" : status.configured ? "needs_token" : "needs_credentials",
+      links: {
+        dashboard: `${workerOrigin}/dashboard`,
+        oauthConnect: `${workerOrigin}/api/auth/aliexpress/connect`,
+        aliexpressApps: "https://openservice.aliexpress.com/app/list",
+        aliexpressDocs: "https://openservice.aliexpress.com/doc/doc.htm",
+        dsCenter: "https://ds.aliexpress.com/",
+        cloudflareWorker: "https://dash.cloudflare.com/",
+      },
+    },
+  });
+});
+
+/** حفظ Access Token يدوياً (من API Testing Tool في AliExpress Console) */
+aliexpressAuth.post("/aliexpress/token", requireAuth, async (c) => {
+  const body = (await c.req.json().catch(() => ({}))) as {
+    accessToken?: string;
+    refreshToken?: string;
+    expiresAt?: string;
+  };
+
+  const accessToken = String(body.accessToken ?? "").trim();
+  if (accessToken.length < 8) {
+    return c.json({ ok: false, error: "accessToken مطلوب (من AliExpress API Testing Tool)" }, 400);
+  }
+
+  const configured = await hasAliExpressAppCredentials(c.env);
+  if (!configured) {
+    return c.json(
+      { ok: false, error: "أضف AppKey و AppSecret أولاً في Cloudflare Secrets" },
+      500,
+    );
+  }
+
+  const creds = await loadAliExpressCredentials(c.env);
+  if (!creds) {
+    return c.json({ ok: false, error: "AliExpress credentials missing" }, 500);
+  }
+
+  const expiresAt = body.expiresAt?.trim() || null;
+  await saveAliExpressTokens(c.env, {
+    accessToken,
+    refreshToken: body.refreshToken?.trim() || null,
+    expiresAt,
+  });
+
+  const oauth = new AliExpressOAuth({
+    appKey: creds.appKey,
+    appSecret: creds.appSecret,
+    callbackUrl: creds.callbackUrl,
+  });
+
+  const valid = await oauth.validateToken(accessToken, { expiresAt });
+
+  await auditOAuth(
+    c.env,
+    "aliexpress_oauth:manual_token",
+    { has_refresh_token: Boolean(body.refreshToken), valid },
+    valid ? "success" : "partial",
+    valid ? undefined : "Token saved but validation call failed",
+  );
+
+  return c.json({
+    ok: true,
+    data: {
+      saved: true,
+      valid,
+      expiresAt,
+      message_ar: valid
+        ? "تم حفظ التوكن — APIs الرسمية جاهزة"
+        : "تم الحفظ لكن التحقق فشل — تأكد أن التوكن صالح",
     },
   });
 });

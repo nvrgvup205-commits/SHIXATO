@@ -1,8 +1,7 @@
 import { Hono } from "hono";
 import { requireAliExpressToken } from "../middleware/aliexpress-auth";
-import { AliExpressApiClient } from "../services/aliexpress-api";
-import { AliExpressApiClientService } from "../services/aliexpress-api-client";
-import { loadAliExpressCredentials } from "../services/aliexpress-credentials";
+import { AliExpressApi } from "../services/aliexpress-api";
+import { hasAliExpressAccessToken, loadAliExpressCredentials } from "../services/aliexpress-credentials";
 import { AliExpressService } from "../services/aliexpress";
 import { ImportPipeline } from "../services/pipeline";
 import type { Env, ImportProductInput, ProductSearchFilters, ProductStatus } from "../types";
@@ -31,12 +30,25 @@ products.get("/", requireAuth, async (c) => {
   return c.json({ ok: true, data: rows.slice(0, limit) });
 });
 
-/** Keyword search on AliExpress with rich filters */
+/**
+ * بحث AliExpress — scraping (الافتراضي، يعمل بدون token).
+ * يُكمّل بالـ API الرسمي تلقائياً عند فتح المنتج إن وُجد token.
+ */
 products.post("/search", requireAuth, async (c) => {
   const body = (await c.req.json().catch(() => ({}))) as ProductSearchFilters;
   try {
     const data = await new AliExpressService().search(body);
-    return c.json({ ok: true, data });
+    const hasToken = await hasAliExpressAccessToken(c.env);
+    return c.json({
+      ok: true,
+      data: {
+        ...data,
+        meta: {
+          source: "scraping",
+          apiEnrichmentAvailable: hasToken,
+        },
+      },
+    });
   } catch (err) {
     if (err instanceof HttpError) {
       return c.json(
@@ -48,7 +60,38 @@ products.post("/search", requireAuth, async (c) => {
   }
 });
 
-/** Official AliExpress DS product profile (requires OAuth access token) */
+/** بحث عبر API الرسمي (يحتاج access token) */
+products.post("/api-search", requireAuth, requireAliExpressToken(), async (c) => {
+  const body = (await c.req.json().catch(() => ({}))) as {
+    keyword?: string;
+    page?: number;
+  };
+  const keyword = String(body.keyword ?? "").trim();
+  const page = Math.max(1, Number(body.page ?? 1));
+
+  if (keyword.length < 2) {
+    return c.json({ ok: false, error: "keyword مطلوب (حرفين على الأقل)" }, 400);
+  }
+
+  try {
+    const api = await AliExpressApi.fromEnv(c.env);
+    const results = await api.searchProducts(keyword, page);
+    return c.json({
+      ok: true,
+      data: { results, keyword, page, source: "aliexpress_ds_api" },
+    });
+  } catch (err) {
+    if (err instanceof HttpError) {
+      return c.json(
+        { ok: false, error: err.message, details: err.details ?? null },
+        err.status as 400 | 401 | 500 | 502,
+      );
+    }
+    throw err;
+  }
+});
+
+/** ملف المنتج الكامل من API الرسمي (تفاصيل + شحن + ربح) */
 products.get("/profile/:productId", requireAuth, requireAliExpressToken(), async (c) => {
   const productId = c.req.param("productId").trim();
   if (!productId) {
@@ -56,16 +99,27 @@ products.get("/profile/:productId", requireAuth, requireAliExpressToken(), async
   }
 
   try {
-    const client = await AliExpressApiClientService.fromEnv(c.env);
-    const data = await client.getFullProductProfile(productId);
+    const api = await AliExpressApi.fromEnv(c.env);
+    const [details, shipping] = await Promise.all([
+      api.getProductDetails(productId),
+      api.getShippingCost(productId, 1).catch(() => null),
+    ]);
+
     return c.json({
       ok: true,
-      data,
-      meta: {
-        source: "aliexpress_ds_api",
-        note_ar:
-          "التعليقات الإيجابية/السلبية تُقدَّر من متوسط النجوم — الـ API الرسمي لا يُرجع عددًا منفصلًا لكل نوع.",
+      data: {
+        ...details,
+        shipping,
+        shippingToSaudi: shipping
+          ? {
+              serviceName: shipping.service_name,
+              amount: shipping.cost,
+              currency: shipping.currency,
+              estimatedDeliveryDays: shipping.estimated_delivery_days,
+            }
+          : null,
       },
+      meta: { source: "aliexpress_ds_api" },
     });
   } catch (err) {
     if (err instanceof HttpError) {
@@ -78,14 +132,12 @@ products.get("/profile/:productId", requireAuth, requireAliExpressToken(), async
   }
 });
 
-/** Official AliExpress freight quote (requires OAuth access token) */
+/** تكلفة الشحن للسعودية عبر API الرسمي */
 products.post("/freight", requireAuth, requireAliExpressToken(), async (c) => {
   const body = (await c.req.json().catch(() => ({}))) as {
     productId?: string;
     aliexpressId?: string;
     quantity?: number;
-    shipToCountry?: string;
-    price?: string;
   };
 
   const productId = String(body.productId ?? body.aliexpressId ?? "").trim();
@@ -93,26 +145,10 @@ products.post("/freight", requireAuth, requireAliExpressToken(), async (c) => {
     return c.json({ ok: false, error: "productId مطلوب" }, 400);
   }
 
-  const creds = await loadAliExpressCredentials(c.env);
-  if (!creds) {
-    return c.json(
-      {
-        ok: false,
-        error: "AliExpress API غير مضبوط — أضف AppKey و AppSecret في Secrets",
-      },
-      500,
-    );
-  }
-
   try {
-    const client = new AliExpressApiClient(creds);
-    const options = await client.calculateFreight({
-      productId,
-      quantity: body.quantity,
-      shipToCountry: body.shipToCountry,
-      price: body.price,
-    });
-    return c.json({ ok: true, data: { productId, options } });
+    const api = await AliExpressApi.fromEnv(c.env);
+    const shipping = await api.getShippingCost(productId, body.quantity ?? 1);
+    return c.json({ ok: true, data: shipping });
   } catch (err) {
     if (err instanceof HttpError) {
       return c.json(
