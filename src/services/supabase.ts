@@ -34,6 +34,15 @@ export type CreateSyncLogInput = {
   error_message?: string | null;
 };
 
+export type AliExpressTokenRecord = {
+  id: string;
+  access_token: string;
+  refresh_token: string | null;
+  expires_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
 export type UpsertFavoriteInput = {
   aliexpress_id: string;
   title: string;
@@ -215,6 +224,57 @@ export class SupabaseService {
     if (error) {
       throw new HttpError(500, "Failed to save setting", error);
     }
+  }
+
+  async saveAliExpressToken(input: {
+    accessToken: string;
+    refreshToken?: string | null;
+    expiresAt?: string | null;
+  }): Promise<AliExpressTokenRecord> {
+    const { data, error } = await this.client
+      .from("aliexpress_tokens")
+      .upsert(
+        {
+          id: "default",
+          access_token: input.accessToken,
+          refresh_token: input.refreshToken ?? null,
+          expires_at: input.expiresAt ?? null,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: "id" },
+      )
+      .select("*")
+      .single();
+
+    if (error) {
+      throw new HttpError(500, "Failed to save AliExpress token", error);
+    }
+
+    // Backward compatibility with app_settings readers
+    await this.setSetting("aliexpress_access_token", input.accessToken);
+    if (input.refreshToken) {
+      await this.setSetting("aliexpress_refresh_token", input.refreshToken);
+    }
+    if (input.expiresAt) {
+      await this.setSetting("aliexpress_token_expires_at", input.expiresAt);
+    }
+
+    return data as AliExpressTokenRecord;
+  }
+
+  async getAliExpressToken(): Promise<AliExpressTokenRecord | null> {
+    const { data, error } = await this.client
+      .from("aliexpress_tokens")
+      .select("*")
+      .eq("id", "default")
+      .maybeSingle();
+
+    if (error) {
+      console.warn("getAliExpressToken failed", error.message);
+      return null;
+    }
+
+    return (data as AliExpressTokenRecord | null) ?? null;
   }
 
   async upsertFavorite(input: UpsertFavoriteInput): Promise<FavoriteRecord> {
