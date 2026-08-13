@@ -10,6 +10,7 @@ import {
   saveAliExpressTokens,
 } from "../services/aliexpress-credentials";
 import { AliExpressOAuth } from "../services/aliexpress-oauth";
+import { AliExpressApi } from "../services/aliexpress-api";
 import { SupabaseService } from "../services/supabase";
 import type { Env } from "../types";
 import { requireAuth } from "../utils/session";
@@ -343,6 +344,52 @@ aliexpressAuth.post("/aliexpress/token", requireAuth, async (c) => {
       message_ar: check.valid
         ? "تم حفظ التوكن — APIs الرسمية جاهزة ✅"
         : `تم الحفظ لكن التحقق فشل: ${check.error ?? "تأكد أنك لصقت access_token وليس code"}`,
+    },
+  });
+});
+
+/** تشخيص البحث — يوضح لماذا النتائج 0 */
+aliexpressAuth.get("/aliexpress/search-probe", requireAuth, async (c) => {
+  const creds = await loadAliExpressCredentials(c.env);
+  if (!creds?.accessToken) {
+    return c.json({ ok: false, error: "لا يوجد token — اربط OAuth أولاً" }, 401);
+  }
+
+  const api = await AliExpressApi.fromEnv(c.env);
+  const probes: Array<Record<string, unknown>> = [];
+
+  try {
+    const rows = await api.searchProductsByKeyword("kids toys", 1, 20);
+    probes.push({ method: "aliexpress.ds.product.search", ok: true, count: rows.length });
+  } catch (err) {
+    probes.push({
+      method: "aliexpress.ds.product.search",
+      ok: false,
+      error: err instanceof HttpError ? err.message : String(err),
+    });
+  }
+
+  try {
+    const feed = await api.fetchRecommendFeed({ keyword: "kids toys", pages: 1, strictKeyword: false });
+    probes.push({ method: "aliexpress.ds.recommend.feed.get", ok: true, count: feed.length });
+  } catch (err) {
+    probes.push({
+      method: "aliexpress.ds.recommend.feed.get",
+      ok: false,
+      error: err instanceof HttpError ? err.message : String(err),
+    });
+  }
+
+  return c.json({
+    ok: true,
+    data: {
+      hasToken: true,
+      tokenExpiresAt: creds.tokenExpiresAt,
+      probes,
+      hintAr:
+        probes.every((p) => Number(p.count ?? 0) === 0)
+          ? "التوكن شغال لكن AliExpress لم يُرجع منتجات — سجّل في DS Center: https://ds.aliexpress.com/"
+          : "البحث يعمل — جرّب turbo discover من جديد",
     },
   });
 });
