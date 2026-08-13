@@ -202,15 +202,26 @@ export class AliExpressApi {
     const cached = this.cache.get<AliExpressSearchProduct[]>(cacheKey);
     if (cached) return cached;
 
-    const raw = await this.callSync("aliexpress.ds.product.search", {
-      keywords: q,
-      page_no: String(page),
-      page_size: String(size),
-      ship_to_country: DEFAULT_SHIP_TO,
-      target_currency: SEARCH_CURRENCY,
-      target_language: "EN",
-      sort: "SALE_PRICE_ASC",
-    });
+    let raw: Record<string, unknown>;
+    try {
+      raw = await this.callSync("aliexpress.ds.product.search", {
+        keywords: q,
+        page_no: String(page),
+        page_size: String(size),
+        ship_to_country: DEFAULT_SHIP_TO,
+        target_currency: SEARCH_CURRENCY,
+        target_language: "EN",
+      });
+    } catch (err) {
+      const message = err instanceof HttpError ? err.message : "product.search failed";
+      await this.log("aliexpress_api:keyword_search", {
+        keyword: q,
+        page,
+        result_count: 0,
+        error: message,
+      });
+      throw err;
+    }
 
     const mapped = this.extractSearchProducts(raw)
       .map((item) => this.mapSearchRow(item))
