@@ -1,6 +1,6 @@
 import { findCategory } from "../data/categories";
 import { DISCOVERY_EXCLUDES } from "../data/dropship-presets";
-import type { AliExpressListing, Env, ProductSearchFilters } from "../types";
+import type { AliExpressListing, Env } from "../types";
 import { HttpError } from "../utils/http";
 import {
   delayBeforeRequest,
@@ -8,10 +8,10 @@ import {
 } from "../utils/rate-limiter";
 import { mapApiSearchProductToListing } from "./api-listing-mapper";
 import { AliExpressApi } from "./aliexpress-api";
-import { AliExpressService } from "./aliexpress";
 import {
   hasAliExpressAccessToken,
 } from "./aliexpress-credentials";
+import { searchListingsForKeyword } from "./hybrid-search";
 import { KeywordGeneratorService, type KeywordSource } from "./keyword-generator";
 import { WowAnalyzerService } from "./wow-analyzer";
 import {
@@ -193,8 +193,6 @@ function buildScoredListing(
  * Multi-keyword discovery — merges many searches, ranks all, returns picks + rejected preview.
  */
 export class AutoDiscoverService {
-  private aliexpress = new AliExpressService();
-
   async discover(options: AutoDiscoverOptions): Promise<AutoDiscoverResult> {
     const start = Date.now();
     const categoryId = options.category?.trim();
@@ -271,24 +269,13 @@ export class AutoDiscoverService {
       try {
         await delayBeforeRequest();
 
-        const filters: ProductSearchFilters = {
-          query: keyword,
-          category: categoryId,
-          page: 1,
-          locale: "ar",
-          sort: "orders",
-          filterMode: "off",
-          applyUrlFilters: false,
+        if (!options.env) continue;
+
+        const items = await searchListingsForKeyword(options.env, keyword, {
           fetchPages,
           currency,
-          shipToCountry: shipTo,
-          discoveryMode: true,
-          minLaunchYear: CURRENT_YEAR,
-          excludeKeywords: DISCOVERY_EXCLUDES,
-        };
-
-        const batch = await this.aliexpress.search(filters);
-        const items = batch.resultsBeforeFilter ?? batch.results;
+          enrichLimit: turbo ? 16 : 12,
+        });
         totalRaw += items.length;
         scanned += 1;
 
@@ -368,7 +355,7 @@ export class AutoDiscoverService {
     } else if (minWowUsed < minWow) {
       warning = `عرضنا أفضل ${results.length} منتج (إبهار ≥ ${minWowUsed}/10)`;
     } else if (apiListingsMerged > 0) {
-      warning = `دمجنا ${apiListingsMerged} منتج من API الرسمي مع السكرابينج`;
+      warning = `دمجنا ${apiListingsMerged} منتج إضافي من API الرسمي`;
     } else if (results.length < 5) {
       warning = `${results.length} منتج يثبت — راجع المُتجاهَل للمزيد`;
     }
