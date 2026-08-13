@@ -1511,13 +1511,18 @@ export function renderDashboardPage(storeDomain: string): string {
         const res = await api("/api/auth/aliexpress/status");
         const d = res.data || {};
         const ok = d.hasAccessToken;
-        hint.textContent = ok
-          ? "✅ API الرسمي جاهز — الشحن والتفاصيل تُحمّل تلقائياً عند فتح المنتج"
-          : d.configured
-            ? "⚠️ AppKey موجود — تحتاج Access Token (OAuth أو لصق يدوي)"
-            : "❌ أضف App Secret في Cloudflare Secrets أولاً";
+        const keyOk = d.appKeyMatches !== false;
+        hint.textContent = !keyOk
+          ? "⚠️ AppKey غير مطابق — المفروض " + (d.expectedAppKey || "542618") + " (راجع Cloudflare Variables)"
+          : ok
+            ? "✅ API الرسمي جاهز — الشحن والتفاصيل تُحمّل تلقائياً عند فتح المنتج"
+            : d.configured
+              ? "⚠️ AppKey موجود — تحتاج Access Token (OAuth أو لصق يدوي)"
+              : "❌ أضف App Secret في Cloudflare Secrets أولاً";
         box.innerHTML =
-          "<div><strong>AppKey:</strong> " + escapeHtml(String(d.appKey || "—")) + "</div>" +
+          "<div><strong>AppKey:</strong> " + escapeHtml(String(d.appKey || "—")) +
+          (d.expectedAppKey ? " <span style='opacity:.8'>(المطلوب: " + escapeHtml(d.expectedAppKey) + ")</span>" : "") +
+          (!keyOk ? " <span style='color:#ffb4a8'>❌ غير مطابق</span>" : " ✅") + "</div>" +
           "<div><strong>Token:</strong> " + (ok ? "موجود ✅" : "مفقود ❌") + "</div>" +
           (d.tokenExpiresAt ? "<div><strong>ينتهي:</strong> " + escapeHtml(d.tokenExpiresAt) + "</div>" : "") +
           "<div><strong>Callback:</strong> <code style='font-size:.8rem'>" + escapeHtml(d.callbackUrl || "") + "</code></div>";

@@ -126,6 +126,8 @@ aliexpressAuth.get("/aliexpress/status", requireAuth, async (c) => {
       tokenExpiresAt: creds?.tokenExpiresAt ?? tokenRow?.expires_at ?? null,
       connectUrl: "/api/auth/aliexpress/connect",
       appKey: creds?.appKey ?? null,
+      expectedAppKey: status.expectedAppKey,
+      appKeyMatches: status.appKeyMatches,
       mode: creds?.accessToken ? "api_ready" : status.configured ? "needs_token" : "needs_credentials",
       links: {
         dashboard: `${workerOrigin}/dashboard`,
