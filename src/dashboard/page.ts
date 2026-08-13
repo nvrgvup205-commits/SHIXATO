@@ -1603,7 +1603,7 @@ export function renderDashboardPage(storeDomain: string): string {
         hint.textContent = !keyOk
           ? "⚠️ AppKey غير مطابق — المفروض " + (d.expectedAppKey || "542618") + " (راجع Cloudflare Variables)"
           : ok
-            ? "✅ API الرسمي جاهز — الشحن والتفاصيل تُحمّل تلقائياً عند فتح المنتج"
+            ? "✅ التوكن موجود وشغال — لا تلصق code قديم. اضغط «اختبار API» ثم جرّب البحث"
             : d.configured
               ? "⚠️ اضغط «ربط OAuth» — أو الصق code من رابط AliExpress بعد الموافقة"
               : "❌ أضف App Secret في Cloudflare Secrets أولاً";
@@ -1689,7 +1689,10 @@ export function renderDashboardPage(storeDomain: string): string {
         }
         loadAliExpressStatus();
       } catch (e) {
-        const hint = e.hintAr || e.message || "فشل استبدال الكود — جرّب OAuth من جديد";
+        const hint = e.hintAr || e.message || "فشل استبدال الكود";
+        if (/انستخدم|Invalid authorization/i.test(hint + (e.message || ""))) {
+          loadAliExpressStatus();
+        }
         toast(hint, true);
       } finally {
         $("aeExchangeCodeBtn").disabled = false;

@@ -61,14 +61,36 @@ async function fetchApiPool(
 ): Promise<AliExpressListing[]> {
   try {
     const api = await AliExpressApi.fromEnv(env);
-    const rows = await api.fetchRecommendFeed({
-      keyword,
-      pages: Math.min(pages, 4),
-      strictKeyword: false,
-    });
-    return rows.map((row) => mapApiSearchProductToListing(row, currency));
+    const byId = new Map<string, AliExpressListing>();
+
+    if (keyword?.trim()) {
+      for (let page = 1; page <= Math.min(pages, 4); page += 1) {
+        const rows = await api.searchProductsByKeyword(keyword, page).catch(() => []);
+        for (const row of rows) {
+          const listing = mapApiSearchProductToListing(row, currency);
+          if (listing.aliexpressId) byId.set(listing.aliexpressId, listing);
+        }
+        if (rows.length < 10) break;
+      }
+    }
+
+    if (byId.size < 12) {
+      const feedRows = await api.fetchRecommendFeed({
+        keyword,
+        pages: Math.min(pages, 3),
+        strictKeyword: false,
+      });
+      for (const row of feedRows) {
+        const listing = mapApiSearchProductToListing(row, currency);
+        if (listing.aliexpressId && !byId.has(listing.aliexpressId)) {
+          byId.set(listing.aliexpressId, listing);
+        }
+      }
+    }
+
+    return [...byId.values()];
   } catch (err) {
-    console.warn("API feed failed", err);
+    console.warn("API search failed", err);
     return [];
   }
 }

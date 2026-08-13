@@ -257,6 +257,11 @@ aliexpressAuth.post("/aliexpress/exchange-code", requireAuth, async (c) => {
   } catch (err) {
     const message =
       err instanceof HttpError ? err.message : "تعذّر استبدال الكود";
+    const creds = await loadAliExpressCredentials(c.env);
+    const hasToken = Boolean(creds?.accessToken);
+    const codeUsed =
+      /invalid authorization code|code has been used|authorization code/i.test(message);
+
     await auditOAuth(
       c.env,
       "aliexpress_oauth:manual_code_exchange",
@@ -268,8 +273,11 @@ aliexpressAuth.post("/aliexpress/exchange-code", requireAuth, async (c) => {
       {
         ok: false,
         error: message,
-        hintAr:
-          "الكود صالح لمرة واحدة — اضغط «ربط OAuth» من جديد واحصل على code جديد",
+        hintAr: codeUsed && hasToken
+          ? "الكود انستخدم قبل كده — لكن التوكن موجود أصلاً ✅ اضغط «اختبار API» ثم جرّب البحث"
+          : codeUsed
+            ? "الكود صالح لمرة واحدة — اضغط «ربط OAuth» من جديد واحصل على code جديد"
+            : "تأكد أنك لصقت code وليس access_token",
       },
       err instanceof HttpError ? err.status : 502,
     );

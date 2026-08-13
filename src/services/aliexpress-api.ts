@@ -159,23 +159,73 @@ export class AliExpressApi {
   // -------------------------------------------------------------------------
 
   /**
-   * بحث المنتجات — يستخدم recommend feed ثم يطابق الكلمة (fuzzy).
-   * لا يوجد keyword search مباشر في DropShip API.
+   * بحث المنتجات بالكلمة — يستخدم aliexpress.ds.product.search (الطريقة الصحيحة).
+   * recommend feed لا يدعم keyword وغالباً يرجع 0 منتجات.
    */
   async searchProducts(
     keyword: string,
     pageNumber = 1,
   ): Promise<AliExpressSearchProduct[]> {
+    const q = keyword.trim();
+    if (q.length < 2) return [];
+
+    const fromKeyword = await this.searchProductsByKeyword(q, pageNumber).catch(
+      () => [] as AliExpressSearchProduct[],
+    );
+    if (fromKeyword.length > 0) return fromKeyword;
+
     return this.fetchRecommendFeed({
-      keyword,
+      keyword: q,
       pages: 1,
       pageStart: pageNumber,
-      strictKeyword: true,
+      strictKeyword: false,
     });
   }
 
+  /** DS keyword search — aliexpress.ds.product.search */
+  async searchProductsByKeyword(
+    keyword: string,
+    pageNumber = 1,
+    pageSize = 50,
+  ): Promise<AliExpressSearchProduct[]> {
+    this.requireAccessToken();
+    const q = keyword.trim();
+    if (q.length < 2) return [];
+
+    const page = Math.max(pageNumber, 1);
+    const size = Math.min(Math.max(pageSize, 10), 50);
+    const cacheKey = `kwsearch:${q}:${page}:${size}`;
+    const cached = this.cache.get<AliExpressSearchProduct[]>(cacheKey);
+    if (cached) return cached;
+
+    const raw = await this.callSync("aliexpress.ds.product.search", {
+      keywords: q,
+      page_no: String(page),
+      page_size: String(size),
+      ship_to_country: DEFAULT_SHIP_TO,
+      target_currency: SEARCH_CURRENCY,
+      target_language: "EN",
+      sort: "SALE_PRICE_ASC",
+    });
+
+    const mapped = this.extractSearchProducts(raw)
+      .map((item) => this.mapSearchRow(item))
+      .filter((row) => row.product_id);
+
+    await this.log("aliexpress_api:keyword_search", {
+      keyword: q,
+      page,
+      result_count: mapped.length,
+    });
+
+    if (mapped.length > 0) {
+      this.cache.set(cacheKey, mapped, CACHE_TTL_MS);
+    }
+    return mapped;
+  }
+
   /**
-   * DS recommend feeds — أفضل مصدر للمنتجات الرائجة عند توفر access token.
+   * DS recommend feeds — مكمّل فقط عندما keyword search لا يكفي.
    */
   async fetchRecommendFeed(options?: {
     keyword?: string;
@@ -550,12 +600,37 @@ export class AliExpressApi {
     const response =
       (raw.aliexpress_ds_recommend_feed_get_response as Record<string, unknown>) || raw;
     const result = (response.result as Record<string, unknown>) || response;
-    const list =
-      (result.products as unknown[]) ||
-      (result.product_list as unknown[]) ||
-      (result.aeop_ae_product_display_dto_list as unknown[]) ||
-      [];
-    return list.filter((row): row is Record<string, unknown> => !!row && typeof row === "object");
+    return this.normalizeProductList(result);
+  }
+
+  private extractSearchProducts(raw: Record<string, unknown>): Record<string, unknown>[] {
+    const response =
+      (raw.aliexpress_ds_product_search_response as Record<string, unknown>) || raw;
+    const result = (response.result as Record<string, unknown>) || response;
+    return this.normalizeProductList(result);
+  }
+
+  private normalizeProductList(
+    result: Record<string, unknown>,
+  ): Record<string, unknown>[] {
+    const candidates: unknown[] = [];
+    const products = result.products;
+    if (Array.isArray(products)) {
+      candidates.push(...products);
+    } else if (products && typeof products === "object") {
+      const node = products as Record<string, unknown>;
+      for (const key of ["product", "aeop_ae_product_display_dto", "traffic_product_d_t_o"]) {
+        const nested = node[key];
+        if (Array.isArray(nested)) candidates.push(...nested);
+      }
+    }
+    if (Array.isArray(result.product_list)) candidates.push(...result.product_list);
+    if (Array.isArray(result.aeop_ae_product_display_dto_list)) {
+      candidates.push(...result.aeop_ae_product_display_dto_list);
+    }
+    return candidates.filter(
+      (row): row is Record<string, unknown> => !!row && typeof row === "object",
+    );
   }
 
   private mapSearchRow(item: Record<string, unknown>): AliExpressSearchProduct {
