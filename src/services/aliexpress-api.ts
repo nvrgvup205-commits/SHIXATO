@@ -141,7 +141,8 @@ export class AliExpressApiClient {
     return json;
   }
 
-  private async callSync(
+  /** Signed IOP sync call (public for higher-level clients). */
+  async callSync(
     method: string,
     apiParams: Record<string, string>,
   ): Promise<Record<string, unknown>> {
