@@ -100,6 +100,7 @@ favorites.post("/smart-search", requireAuth, async (c) => {
         ...data,
         presetGrade: grade,
         presetLabelAr: DROPSHIP_PRESETS.find((p) => p.id === grade)?.labelAr,
+        meta: data.meta,
       },
     });
   } catch (err) {

@@ -1004,6 +1004,8 @@ export function renderDashboardPage(storeDomain: string): string {
           " بعد الفلتر / " + (data.totalParsed ?? items.length) + " قبل الفلتر" +
           via +
           (data.query ? (" · " + data.query) : "") +
+          (data.meta?.source === "api" ? " · API رسمي ✅" : "") +
+          (data.enrichedCount ? (" · " + data.enrichedCount + " مُثرى") : "") +
           (data.warning ? (" — " + data.warning) : "");
 
         if (data.searchUrl) {
@@ -1076,6 +1078,12 @@ export function renderDashboardPage(storeDomain: string): string {
 
     function buildProductDetailLines(item) {
       const lines = [];
+      if (item.storeName) {
+        lines.push("🏪 " + item.storeName);
+      }
+      if (item.categoryName) {
+        lines.push("📂 " + item.categoryName);
+      }
       const route =
         (item.shipFrom ? ("من " + item.shipFrom) : "") +
         (item.shipTo ? (" → إلى " + item.shipTo) : "");
@@ -1428,6 +1436,8 @@ export function renderDashboardPage(storeDomain: string): string {
           "نتائج: " + (data.totalAfterFilter ?? items.length) +
           " بعد الفلتر / " + (data.totalParsed ?? items.length) + " قبل الفلتر المحلي" +
           " · بحث: " + (data.query || "") + via +
+          (data.meta?.source === "api" ? " · API رسمي ✅" : "") +
+          (data.enrichedCount ? (" · " + data.enrichedCount + " مُثرى") : "") +
           (data.warning ? (" — " + data.warning) : "");
 
         if (data.searchUrl) {
