@@ -159,46 +159,88 @@ export class AliExpressApi {
   // -------------------------------------------------------------------------
 
   /**
-   * بحث المنتجات — يستخدم recommend feed ثم يفلتر بالكلمة محلياً.
+   * بحث المنتجات — يستخدم recommend feed ثم يطابق الكلمة (fuzzy).
    * لا يوجد keyword search مباشر في DropShip API.
    */
   async searchProducts(
     keyword: string,
     pageNumber = 1,
   ): Promise<AliExpressSearchProduct[]> {
-    const q = keyword.trim();
-    if (q.length < 2) {
-      throw new HttpError(400, "keyword يجب أن يكون حرفين على الأقل");
-    }
+    return this.fetchRecommendFeed({
+      keyword,
+      pages: 1,
+      pageStart: pageNumber,
+      strictKeyword: true,
+    });
+  }
 
-    const page = Math.max(1, pageNumber);
-    const cacheKey = `search:${q}:${page}`;
+  /**
+   * DS recommend feeds — أفضل مصدر للمنتجات الرائجة عند توفر access token.
+   */
+  async fetchRecommendFeed(options?: {
+    keyword?: string;
+    pages?: number;
+    pageStart?: number;
+    pageSize?: number;
+    feedNames?: string[];
+    /** When false, keyword only boosts ranking instead of hard-filtering */
+    strictKeyword?: boolean;
+  }): Promise<AliExpressSearchProduct[]> {
+    const keyword = options?.keyword?.trim() ?? "";
+    const pages = Math.min(Math.max(options?.pages ?? 3, 1), 8);
+    const pageStart = Math.max(options?.pageStart ?? 1, 1);
+    const pageSize = Math.min(Math.max(options?.pageSize ?? 50, 10), 50);
+    const feedNames = options?.feedNames?.length
+      ? options.feedNames
+      : ["DS bestseller", "DS new arrival", "DS hot product"];
+    const strictKeyword = options?.strictKeyword ?? Boolean(keyword);
+
+    const cacheKey = `feed:${keyword}:${pages}:${pageStart}:${feedNames.join(",")}:${strictKeyword}`;
     const cached = this.cache.get<AliExpressSearchProduct[]>(cacheKey);
     if (cached) return cached;
 
-    const raw = await this.callSync("aliexpress.ds.recommend.feed.get", {
-      feed_name: "DS bestseller",
-      country: DEFAULT_SHIP_TO,
-      target_currency: SEARCH_CURRENCY,
-      target_language: "EN",
-      page_size: "50",
-      page_no: String(page),
-      sort: "volumeDesc",
-    });
+    const byId = new Map<string, AliExpressSearchProduct>();
 
-    const items = this.extractFeedProducts(raw);
-    const needle = q.toLowerCase();
-    const mapped = items
-      .map((item) => this.mapSearchRow(item))
-      .filter((p) => p.title.toLowerCase().includes(needle));
+    for (const feedName of feedNames) {
+      for (let offset = 0; offset < pages; offset += 1) {
+        const pageNo = pageStart + offset;
+        const raw = await this.callSync("aliexpress.ds.recommend.feed.get", {
+          feed_name: feedName,
+          country: DEFAULT_SHIP_TO,
+          target_currency: SEARCH_CURRENCY,
+          target_language: "EN",
+          page_size: String(pageSize),
+          page_no: String(pageNo),
+          sort: "volumeDesc",
+        });
 
-    await this.log("aliexpress_api:search", {
-      keyword: q,
-      page,
+        for (const item of this.extractFeedProducts(raw)) {
+          const mapped = this.mapSearchRow(item);
+          if (!mapped.product_id) continue;
+          byId.set(mapped.product_id, mapped);
+        }
+      }
+    }
+
+    let mapped = [...byId.values()];
+    if (keyword) {
+      mapped = mapped
+        .map((row) => ({
+          row,
+          relevance: keywordRelevanceScore(row.title, keyword),
+        }))
+        .filter(({ relevance }) => !strictKeyword || relevance >= 0.35)
+        .sort((a, b) => b.relevance - a.relevance)
+        .map(({ row }) => row);
+    }
+
+    await this.log("aliexpress_api:feed", {
+      keyword: keyword || null,
+      pages,
       result_count: mapped.length,
     });
 
-    this.cache.set(cacheKey, mapped);
+    this.cache.set(cacheKey, mapped, CACHE_TTL_MS);
     return mapped;
   }
 
@@ -686,6 +728,25 @@ function toNumber(value: unknown, fallback: number): number {
 function toOptionalNumber(value: unknown): number | undefined {
   const n = Number(value);
   return Number.isFinite(n) ? n : undefined;
+}
+
+/** 0–1 relevance between product title and search keyword (token overlap). */
+export function keywordRelevanceScore(title: string, keyword: string): number {
+  const norm = (s: string) =>
+    s
+      .toLowerCase()
+      .replace(/[^\w\s\u0600-\u06FF]+/g, " ")
+      .trim();
+  const titleHay = norm(title);
+  const tokens = norm(keyword)
+    .split(/\s+/)
+    .filter((t) => t.length > 2);
+  if (!tokens.length) return 1;
+  let hits = 0;
+  for (const token of tokens) {
+    if (titleHay.includes(token)) hits += 1;
+  }
+  return hits / tokens.length;
 }
 
 function extractImages(node: Record<string, unknown>): string[] {

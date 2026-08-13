@@ -73,7 +73,7 @@ describe("AliExpressApi", () => {
 
     await api.searchProducts("mesh", 1);
     await api.searchProducts("mesh", 1);
-    expect(spy).toHaveBeenCalledTimes(1);
+    expect(spy).toHaveBeenCalledTimes(3);
   });
 
   it("parses product details", async () => {

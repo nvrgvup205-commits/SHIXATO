@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { requireAliExpressToken } from "../middleware/aliexpress-auth";
 import { AliExpressApi } from "../services/aliexpress-api";
+import { hybridAliExpressSearch } from "../services/hybrid-search";
 import { hasAliExpressAccessToken, loadAliExpressCredentials } from "../services/aliexpress-credentials";
 import { AliExpressService } from "../services/aliexpress";
 import { ImportPipeline } from "../services/pipeline";
@@ -37,15 +38,16 @@ products.get("/", requireAuth, async (c) => {
 products.post("/search", requireAuth, async (c) => {
   const body = (await c.req.json().catch(() => ({}))) as ProductSearchFilters;
   try {
-    const data = await new AliExpressService().search(body);
+    const data = await hybridAliExpressSearch(c.env, body);
     const hasToken = await hasAliExpressAccessToken(c.env);
     return c.json({
       ok: true,
       data: {
         ...data,
         meta: {
-          source: "scraping",
+          source: hasToken ? "hybrid" : "scraping",
           apiEnrichmentAvailable: hasToken,
+          apiMerged: data.apiMerged ?? 0,
         },
       },
     });
