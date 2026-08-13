@@ -1,5 +1,5 @@
 import { resolveSearchQuery } from "../data/categories";
-import { slugifyWholesaleQuery } from "../data/aliexpress-search-url";
+import { slugifyWholesaleQuery, buildLegacyWholesaleUrl } from "../data/aliexpress-search-url";
 import type {
   AliExpressListing,
   AliExpressProduct,
@@ -89,6 +89,17 @@ export class AliExpressService {
     return `${host}/w/wholesale-${safe}.html${qs ? `?${qs}` : ""}`;
   }
 
+  /** Legacy `?SearchText=` URL — second fallback when slug path is blocked. */
+  buildLegacySearchUrl(filters: ProductSearchFilters): string {
+    const locale = filters.locale === "en" ? "en" : "ar";
+    return buildLegacyWholesaleUrl({
+      query: filters.query ?? "",
+      page: filters.page,
+      sort: SEARCH_SORT_MAP[filters.sort ?? "orders"],
+      locale,
+    });
+  }
+
   /** Exposed for unit tests / diagnostics */
   parseSearchHtml(html: string): AliExpressListing[] {
     return this.parseSearchResults(html);
@@ -147,6 +158,14 @@ export class AliExpressService {
       if (!normalized.applyUrlFilters) {
         const minimalUrl = this.buildSearchUrl(pageFilters, { minimal: true });
         html = await this.fetchSearchHtml(minimalUrl, cookie, locale);
+        if (
+          page === 1 &&
+          (!html || this.isBlockedPage(html) || this.parseSearchResults(html).length === 0)
+        ) {
+          usedFallbackUrl = true;
+          const legacyUrl = this.buildLegacySearchUrl(pageFilters);
+          html = await this.fetchSearchHtml(legacyUrl, cookie, locale);
+        }
       } else {
         try {
           const fullUrl = this.buildSearchUrl(pageFilters);
@@ -648,6 +667,9 @@ export class AliExpressService {
       '"itemList":{"content":[',
       '"itemList":{ "content":[',
       '"itemList":{"content" : [',
+      '"itemList": {"content": [',
+      '"mods":{"itemList":{"content":[',
+      '"searchResult":{"mods":{"itemList":{"content":[',
     ];
     let idx = -1;
     let needle = needles[0]!;

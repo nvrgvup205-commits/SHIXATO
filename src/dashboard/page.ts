@@ -352,17 +352,17 @@ export function renderDashboardPage(storeDomain: string): string {
               <strong style="font-size:1.05rem">⚡ اكتشاف تلقائي — وضع توربو</strong>
               <p>بحث عميق بكلمات ترندية + منتجات تحل مشاكل + بيانات كاملة للتحليل</p>
             </div>
-            <button class="btn btn-auto-discover" id="autoDiscoverBtn" type="button">ابدأ الاكتشاف (3–5 دقائق)</button>
+            <button class="btn btn-auto-discover" id="autoDiscoverBtn" type="button">ابدأ الاكتشاف (30–90 ثانية)</button>
           </div>
           <div class="turbo-stats">
             <label class="turbo-toggle" for="turboDiscover">
               <input id="turboDiscover" type="checkbox" checked />
               <span>تفعيل التوربو</span>
             </label>
-            <span class="turbo-chip" id="turboChipKeywords"><b>20</b> كلمة بحث</span>
-            <span class="turbo-chip" id="turboChipPages"><b>6</b> صفحات لكل كلمة</span>
-            <span class="turbo-chip" id="turboChipTotal">≈ <b>120</b> صفحة إجمالاً</span>
-            <span class="turbo-chip accent" id="turboChipFocus">تحل مشاكل ✅</span>
+            <span class="turbo-chip" id="turboChipKeywords"><b>8</b> كلمة بحث</span>
+            <span class="turbo-chip" id="turboChipPages"><b>3</b> صفحات لكل كلمة</span>
+            <span class="turbo-chip" id="turboChipTotal">≈ <b>24</b> صفحة · متوازي</span>
+            <span class="turbo-chip accent" id="turboChipFocus">بحث عميق ⚡</span>
           </div>
         </div>
         <div class="search-topbar">
@@ -1182,17 +1182,17 @@ export function renderDashboardPage(storeDomain: string): string {
 
     function updateTurboChips() {
       const turbo = $("turboDiscover").checked;
-      const kw = turbo ? 20 : 15;
-      const pages = turbo ? 6 : 3;
+      const kw = turbo ? 8 : 5;
+      const pages = turbo ? 3 : 2;
       const total = kw * pages;
       $("turboChipKeywords").innerHTML = "<b>" + kw + "</b> كلمة بحث";
       $("turboChipPages").innerHTML = "<b>" + pages + "</b> صفحات لكل كلمة";
-      $("turboChipTotal").innerHTML = "≈ <b>" + total + "</b> صفحة إجمالاً";
+      $("turboChipTotal").innerHTML = "≈ <b>" + total + "</b> صفحة · متوازي";
       $("turboChipFocus").classList.toggle("off", !turbo);
-      $("turboChipFocus").textContent = turbo ? "تحل مشاكل ✅" : "بحث عادي";
+      $("turboChipFocus").textContent = turbo ? "بحث عميق ⚡" : "بحث سريع";
       $("autoDiscoverBtn").textContent = turbo
-        ? "ابدأ الاكتشاف (3–5 دقائق)"
-        : "ابدأ الاكتشاف (1–2 دقيقة)";
+        ? "ابدأ الاكتشاف (30–90 ثانية)"
+        : "ابدأ الاكتشاف (20–45 ثانية)";
     }
 
     async function runAutoDiscover() {
@@ -1209,8 +1209,8 @@ export function renderDashboardPage(storeDomain: string): string {
       const turbo = $("turboDiscover").checked;
       showPresetTip(
         turbo
-          ? "⚡ توربو: 20 كلمة × 6 صفحات — لا تغلق الصفحة (قد يستغرق 3–5 دقائق)"
-          : "⚡ جاري البحث في عشرات الكلمات — لا تغلق الصفحة (1–2 دقيقة)",
+          ? "⚡ بحث عميق: 8 كلمات × 3 صفحات — متوازي (30–90 ثانية)"
+          : "⚡ بحث سريع: 5 كلمات × 2 صفحات (20–45 ثانية)",
       );
       $("searchStatus").textContent = "اكتشاف " + (turbo ? "توربو " : "") + "في «" + catLabel + "»…";
       $("filterActions").classList.add("hidden");
@@ -1222,12 +1222,12 @@ export function renderDashboardPage(storeDomain: string): string {
             category,
             shipToCountry: $("shipToCountry").value,
             currency: $("currency").value,
-            keywordLimit: turbo ? 20 : 15,
-            fetchPages: turbo ? 8 : 5,
+            keywordLimit: turbo ? 8 : 5,
+            fetchPages: turbo ? 3 : 2,
             turbo,
             requireProblemSolving: false,
-            minWow: turbo ? 4 : 5,
-            maxResults: turbo ? 48 : 36,
+            minWow: 3,
+            maxResults: turbo ? 96 : 72,
           }),
         });
         const data = res.data || {};

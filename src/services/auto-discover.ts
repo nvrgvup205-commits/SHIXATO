@@ -1,29 +1,19 @@
 import { findCategory } from "../data/categories";
-import { DISCOVERY_EXCLUDES } from "../data/dropship-presets";
 import type { AliExpressListing, Env } from "../types";
 import { HttpError } from "../utils/http";
-import {
-  delayBeforeRequest,
-  delayBetweenKeywordSearches,
-} from "../utils/rate-limiter";
-import { mapApiSearchProductToListing } from "./api-listing-mapper";
-import { AliExpressApi } from "./aliexpress-api";
+import { deepSearchPool, resolveDiscoverKeywords } from "./deep-search";
 import {
   hasAliExpressAccessToken,
 } from "./aliexpress-credentials";
-import { searchListingsForKeyword } from "./hybrid-search";
 import { enrichListingsFromApi } from "./listing-enricher";
 import { KeywordGeneratorService, type KeywordSource } from "./keyword-generator";
-import { WowAnalyzerService } from "./wow-analyzer";
 import {
   computeWowHeuristic,
   explainWowReject,
-  pickImpressiveWowResults,
   wowToDisplayScore,
 } from "./wow-scoring";
 
 export interface ScoredDiscoverListing extends AliExpressListing {
-  /** إبهار 1–10 — الهدف الأساسي */
   wowScore: number;
   wowStopReasonAr?: string;
   wowProblemAr?: string;
@@ -39,15 +29,11 @@ export interface AutoDiscoverOptions {
   shipToCountry?: string;
   currency?: string;
   keywordLimit?: number;
-  /** Pages per keyword (default 6 turbo / 3 standard, max 8) */
   fetchPages?: number;
-  /** Turbo: 20 keywords × many pages + problem-solving focus */
   turbo?: boolean;
-  /** Minimum wow 1–10 (default 7) */
   minWow?: number;
   maxResults?: number;
   fallbackMinWow?: number;
-  /** When true, skip listings without clear problem-solving signal */
   requireProblemSolving?: boolean;
   env?: Env;
 }
@@ -76,24 +62,9 @@ export interface AutoDiscoverResult {
   executionTimeSeconds: number;
   wowStats: WowScoreStats;
   results: ScoredDiscoverListing[];
-  /** Top scored items that did not pass the pick threshold */
   rejectedResults: ScoredDiscoverListing[];
   warning?: string;
   errors: Array<{ keyword: string; message: string }>;
-}
-
-const CURRENT_YEAR = new Date().getUTCFullYear();
-
-function isRateLimitError(err: unknown): boolean {
-  if (err instanceof HttpError) {
-    const status = err.status;
-    const details = err.details as { status?: number } | undefined;
-    return status === 429 || status === 403 || details?.status === 429 || details?.status === 403;
-  }
-  if (err instanceof Error) {
-    return /429|403|blocked|timeout|abort/i.test(err.message);
-  }
-  return false;
 }
 
 function computeWowStats(scores: number[]): WowScoreStats {
@@ -114,237 +85,142 @@ function computeWowStats(scores: number[]): WowScoreStats {
   };
 }
 
-function ingestListing(
-  byId: Map<string, ScoredDiscoverListing>,
-  item: AliExpressListing,
-  keyword: string,
-  requireProblemSolving: boolean,
-): void {
-  const heuristic = computeWowHeuristic(item, keyword);
-  if (heuristic.flags.includes("مرفوض")) return;
-
-  let wowScore = heuristic.wowScore;
-  if (requireProblemSolving && heuristic.problemClarity >= 7) {
-    wowScore = Math.min(10, wowScore + 1);
-  }
-
-  const scored = buildScoredListing(item, keyword, wowScore, heuristic.flags);
-  const existing = byId.get(item.aliexpressId);
-  if (!existing || scored.wowScore > existing.wowScore) {
-    byId.set(item.aliexpressId, scored);
-  }
-}
-
-async function mergeOfficialApiPool(
-  env: Env,
-  turbo: boolean,
-  currency: string,
-  keywords: string[],
-  byId: Map<string, ScoredDiscoverListing>,
-  requireProblemSolving: boolean,
-): Promise<number> {
-  if (!(await hasAliExpressAccessToken(env))) return 0;
-
-  try {
-    const api = await AliExpressApi.fromEnv(env);
-    const rows = await api.fetchRecommendFeed({
-      pages: turbo ? 6 : 4,
-      pageSize: 50,
-      strictKeyword: false,
-    });
-
-    let merged = 0;
-    for (const row of rows) {
-      const listing = mapApiSearchProductToListing(row, currency);
-      const keyword =
-        keywords.find((kw) =>
-          listing.title.toLowerCase().includes(kw.toLowerCase().split(/\s+/)[0] ?? ""),
-        ) ?? "api-bestseller";
-      const before = byId.size;
-      ingestListing(byId, listing, keyword, requireProblemSolving);
-      if (byId.size > before) merged += 1;
-    }
-    return merged;
-  } catch {
-    return 0;
-  }
-}
 function buildScoredListing(
   item: AliExpressListing,
   keyword: string,
   wowScore: number,
   flags: string[],
-  insight?: { stopReasonAr?: string; problemAr?: string },
 ): ScoredDiscoverListing {
   return {
     ...item,
     wowScore,
     wowFlags: flags,
-    wowStopReasonAr: insight?.stopReasonAr,
-    wowProblemAr: insight?.problemAr,
     matchedKeyword: keyword,
     discoverFinalScore: wowToDisplayScore(wowScore),
     discoveryScore: wowToDisplayScore(wowScore),
     aiScore: wowToDisplayScore(wowScore),
-    hookAr: insight?.stopReasonAr || item.hookAr,
   };
 }
 
+function scorePool(
+  pool: AliExpressListing[],
+  primaryKeyword: string,
+): ScoredDiscoverListing[] {
+  return pool.map((item) => {
+    const heuristic = computeWowHeuristic(item, primaryKeyword);
+    if (heuristic.flags.includes("مرفوض")) {
+      return buildScoredListing(item, primaryKeyword, 1, heuristic.flags);
+    }
+    return buildScoredListing(item, primaryKeyword, heuristic.wowScore, heuristic.flags);
+  });
+}
+
+async function resolveKeywords(
+  env: Env | undefined,
+  categoryId: string,
+  limit: number,
+): Promise<{ keywords: string[]; source: KeywordSource }> {
+  const curated = resolveDiscoverKeywords(categoryId, limit);
+  if (curated.length >= 6) {
+    return { keywords: curated.slice(0, limit), source: "file" };
+  }
+
+  if (env) {
+    const kw = await new KeywordGeneratorService(env).forCategory(categoryId, limit);
+    if (kw.keywords.length >= 4) {
+      return { keywords: kw.keywords, source: kw.source };
+    }
+  }
+
+  return { keywords: curated, source: "generated" };
+}
+
 /**
- * Multi-keyword discovery — merges many searches, ranks all, returns picks + rejected preview.
+ * Fast deep discovery — parallel keyword batches, curated keywords first, all results shown.
  */
 export class AutoDiscoverService {
   async discover(options: AutoDiscoverOptions): Promise<AutoDiscoverResult> {
     const start = Date.now();
     const categoryId = options.category?.trim();
-    if (!categoryId) {
-      throw new HttpError(400, "اختر الفئة أولًا");
-    }
+    if (!categoryId) throw new HttpError(400, "اختر الفئة أولًا");
 
     const cat = findCategory(categoryId);
-    if (!cat) {
-      throw new HttpError(400, "فئة غير معروفة: " + categoryId);
-    }
+    if (!cat) throw new HttpError(400, "فئة غير معروفة: " + categoryId);
 
     const turbo = options.turbo !== false;
     const keywordLimit = Math.min(
-      Math.max(options.keywordLimit ?? (turbo ? 20 : 15), 10),
-      20,
+      Math.max(options.keywordLimit ?? (turbo ? 8 : 5), 4),
+      10,
     );
     const fetchPages = Math.min(
-      Math.max(options.fetchPages ?? (turbo ? 8 : 5), 1),
-      8,
+      Math.max(options.fetchPages ?? (turbo ? 3 : 2), 1),
+      6,
     );
-    const requireProblemSolving = options.requireProblemSolving ?? false;
-    const minWow = options.minWow ?? (turbo ? 4 : 5);
-    const fallbackMinWow = options.fallbackMinWow ?? 3;
-    const maxResults = Math.min(Math.max(options.maxResults ?? (turbo ? 48 : 36), 12), 72);
+    const minWow = options.minWow ?? 3;
+    const maxResults = Math.min(Math.max(options.maxResults ?? (turbo ? 96 : 72), 24), 120);
 
-    let keywords: string[] = [];
-    let keywordSource: KeywordSource = "generated";
-
-    if (options.env) {
-      const kw = await new KeywordGeneratorService(options.env).forCategory(
-        categoryId,
-        keywordLimit,
-      );
-      keywords = kw.keywords;
-      keywordSource = kw.source;
+    if (!options.env) {
+      throw new HttpError(502, "بيئة التشغيل غير متاحة");
     }
 
-    if (keywords.length < 8) {
-      throw new HttpError(
-        502,
-        "تعذّر توليد كلمات بحث — تأكد من تفعيل Workers AI في wrangler.toml",
-      );
+    const { keywords, source: keywordSource } = await resolveKeywords(
+      options.env,
+      categoryId,
+      keywordLimit,
+    );
+
+    if (keywords.length < 2) {
+      throw new HttpError(502, "تعذّر توليد كلمات بحث للفئة");
     }
 
-    const shipTo = (options.shipToCountry || "SA").toUpperCase();
     const currency = (options.currency || "USD").toUpperCase();
+    const shipTo = (options.shipToCountry || "SA").toUpperCase();
 
-    const byId = new Map<string, ScoredDiscoverListing>();
-    const errors: AutoDiscoverResult["errors"] = [];
-    let totalRaw = 0;
-    let scanned = 0;
-    let apiListingsMerged = 0;
+    const deep = await deepSearchPool(options.env, {
+      categoryId,
+      primaryQuery: cat.query,
+      extraKeywords: keywords.filter((k) => k !== cat.query),
+      fetchPages,
+      maxKeywords: keywordLimit,
+      parallelBatch: turbo ? 4 : 3,
+      targetPoolSize: turbo ? 96 : 72,
+      currency,
+      shipToCountry: shipTo,
+      locale: "ar",
+    });
 
-    if (options.env) {
-      apiListingsMerged = await mergeOfficialApiPool(
-        options.env,
-        turbo,
-        currency,
-        keywords,
-        byId,
-        requireProblemSolving,
-      );
-      totalRaw += apiListingsMerged;
-    }
-
-    for (let i = 0; i < keywords.length; i += 1) {
-      const keyword = keywords[i]!;
-
-      if (i > 0) {
-        await delayBetweenKeywordSearches();
-      }
-
-      try {
-        await delayBeforeRequest();
-
-        if (!options.env) continue;
-
-        const items = await searchListingsForKeyword(options.env, keyword, {
-          fetchPages,
-          currency,
-          enrichLimit: 0,
-        });
-        totalRaw += items.length;
-        scanned += 1;
-
-        for (const item of items) {
-          ingestListing(byId, item, keyword, requireProblemSolving);
-        }
-      } catch (err) {
-        const message = err instanceof Error ? err.message : "فشل البحث";
-        errors.push({ keyword, message });
-
-        if (isRateLimitError(err)) {
-          throw new HttpError(
-            429,
-            "AliExpress حظر مؤقت — انتظر دقيقة ثم أعد الاكتشاف التلقائي",
-            { keyword, partialResults: byId.size },
-          );
-        }
-      }
-    }
-
-    let all = [...byId.values()].sort((a, b) => b.wowScore - a.wowScore);
-
-    // AI wow batch on top heuristic candidates (1 call — cheap)
-    if (options.env?.AI && all.length > 0) {
-      const candidates = all.slice(0, 22);
-      const insights = await new WowAnalyzerService(options.env).analyzeBatch(
-        candidates,
-        cat.labelAr,
-        minWow,
-      );
-
-      all = all.map((item) => {
-        const insight = insights.get(item.aliexpressId.replace(/\D/g, ""));
-        if (!insight) return item;
-
-        const blended = Math.round(
-          insight.wowScore * 0.65 + item.wowScore * 0.35,
-        );
-        const finalWow = Math.max(1, Math.min(10, blended));
-        return buildScoredListing(item, item.matchedKeyword, finalWow, item.wowFlags ?? [], {
-          stopReasonAr: insight.stopReasonAr,
-          problemAr: insight.problemAr,
-        });
-      });
-      all.sort((a, b) => b.wowScore - a.wowScore);
-    }
+    const primaryKeyword = keywords[0] ?? cat.query;
+    let all = scorePool(deep.pool, primaryKeyword).sort(
+      (a, b) => b.wowScore - a.wowScore,
+    );
 
     const wowStats = computeWowStats(all.map((x) => x.wowScore));
+    const minWowUsed = minWow;
 
-    const picked = pickImpressiveWowResults(all, maxResults, minWow, fallbackMinWow);
-    const minWowUsed = picked.minWowUsed;
-    const passed = all.filter((item) => item.wowScore >= minWowUsed);
+    const impressive = all.filter((x) => x.wowScore >= minWowUsed);
+    const lowWow = all.filter((x) => x.wowScore < minWowUsed);
 
-    let results = picked.results.map((item) => ({
+    let results = all.slice(0, maxResults).map((item) => ({
       ...item,
-      discoverRejected: false,
+      discoverRejected: item.wowScore < minWowUsed,
+      discoverRejectReason:
+        item.wowScore < minWowUsed
+          ? explainWowReject(item.wowScore, item.wowFlags ?? [], minWowUsed)
+          : undefined,
     }));
 
     if (options.env && results.length) {
       results = await enrichListingsFromApi(options.env, results, {
-        limit: results.length,
+        limit: Math.min(results.length, 24),
         concurrency: 4,
       });
     }
 
     const resultIds = new Set(results.map((r) => r.aliexpressId));
-    const rejectedResults = all
-      .filter((item) => !resultIds.has(item.aliexpressId))
+    const rejectedResults = [
+      ...lowWow.filter((x) => !resultIds.has(x.aliexpressId)),
+      ...impressive.filter((x) => !resultIds.has(x.aliexpressId)),
+    ]
       .slice(0, 60)
       .map((item) => ({
         ...item,
@@ -358,38 +234,38 @@ export class AutoDiscoverService {
 
     let warning: string | undefined;
     if (!results.length) {
+      warning = `لم نجد منتجات — جرّب فئة أخرى أو أعد المحاولة`;
+    } else {
       warning =
-        `لم نجد منتجات بعد ${scanned} كلمات — جرّب فئة أخرى أو أعد المحاولة`;
-    } else if (minWowUsed < minWow) {
-      warning = `عرضنا أفضل ${results.length} منتج (إبهار ≥ ${minWowUsed}/10)`;
-    } else if (apiListingsMerged > 0) {
-      warning = `دمجنا ${apiListingsMerged} منتج إضافي من API الرسمي`;
-    } else if (results.length < 5) {
-      warning = `${results.length} منتج يثبت — راجع المُتجاهَل للمزيد`;
+        `${results.length} منتج من ${deep.keywordsTried.length} كلمات` +
+        ` · ${deep.pool.length} خام` +
+        (deep.stoppedEarly ? " · توقّف مبكرًا" : "") +
+        (impressive.length ? ` · ${impressive.length} مبهر (≥${minWowUsed})` : "");
+      if (await hasAliExpressAccessToken(options.env)) {
+        warning += ` · ${deep.apiCount} من API`;
+      }
     }
-
-    const executionTimeSeconds = Math.round((Date.now() - start) / 100) / 10;
 
     return {
       categoryId,
       categoryLabelAr: cat.labelAr,
-      keywordsUsed: keywords,
+      keywordsUsed: deep.keywordsTried,
       keywordSource,
-      keywordsScanned: scanned,
+      keywordsScanned: deep.keywordsTried.length,
       pagesPerKeyword: fetchPages,
       turbo,
-      apiListingsMerged,
-      totalRaw,
+      apiListingsMerged: deep.apiCount,
+      totalRaw: deep.scrapeCount + deep.apiCount,
       totalUnique: all.length,
-      totalPassedGate: passed.length,
+      totalPassedGate: impressive.length,
       minWowUsed,
       discoverMode: "wow",
-      executionTimeSeconds,
+      executionTimeSeconds: Math.round((Date.now() - start) / 100) / 10,
       wowStats,
       results,
       rejectedResults,
       warning,
-      errors,
+      errors: [],
     };
   }
 }
