@@ -26,10 +26,12 @@ describe("renderDashboardPage", () => {
     expect(html).toContain('("loginBtn").onclick = login');
   });
 
-  it("includes auto discover banner", () => {
+  it("includes turbo discover stats chips", () => {
     const html = renderDashboardPage("test.myshopify.com");
-    expect(html).toContain('id="autoDiscoverBtn"');
-    expect(html).toContain("اكتشاف تلقائي مبهر");
+    expect(html).toContain('id="turboDiscover"');
+    expect(html).toContain('id="turboChipKeywords"');
+    expect(html).toContain("صفحات لكل كلمة");
+    expect(html).toContain("صفحة إجمالاً");
   });
 
   it("includes AliExpress settings panel", () => {
