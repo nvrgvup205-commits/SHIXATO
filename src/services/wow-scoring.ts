@@ -77,7 +77,28 @@ export function computeWowHeuristic(
     flags.push("بدون صور");
   }
 
-  if (isGenericTitleInHaystack(haystack) && problemClarity < 7) {
+  const sold = listing.soldCount ?? 0;
+  const reviews = listing.reviewCount ?? 0;
+  const rating = listing.rating ?? 0;
+
+  if (sold >= 2000 || reviews >= 120) {
+    curiosity = Math.min(10, curiosity + 2);
+    flags.push("مبيعات قوية");
+  } else if (sold >= 400 || reviews >= 35) {
+    curiosity = Math.min(10, curiosity + 1);
+  }
+
+  if (rating >= 4.7 && reviews >= 12) {
+    problemClarity = Math.min(10, problemClarity + 1);
+    flags.push("تقييم ممتاز");
+  }
+
+  if (listing.enrichmentSources?.includes("api") && sold >= 100) {
+    curiosity = Math.min(10, curiosity + 1);
+    flags.push("API رسمي");
+  }
+
+  if (isGenericTitleInHaystack(haystack) && problemClarity < 7 && sold < 300) {
     problemClarity = Math.min(problemClarity, 3);
     flags.push("عام/مكرر");
   }
@@ -106,4 +127,29 @@ export function explainWowReject(wowScore: number, flags: string[], minWow = 7):
   if (flags.includes("مرفوض")) return "مرفوض: جملة/مقلد";
   if (wowScore < minWow) return `إبهار ${wowScore}/10 — أقل من ${minWow}`;
   return flags.join(" · ") || "لم يمرّ";
+}
+
+/** Pick top impressive listings — never returns empty if pool has items */
+export function pickImpressiveWowResults<T extends { wowScore: number; aliexpressId: string }>(
+  all: T[],
+  maxResults: number,
+  minWow: number,
+  fallbackMinWow: number,
+): { results: T[]; minWowUsed: number } {
+  const thresholds = [minWow, fallbackMinWow, 5, 4, 3, 0];
+  for (const threshold of thresholds) {
+    const passed =
+      threshold === 0 ? all : all.filter((item) => item.wowScore >= threshold);
+    if (passed.length >= Math.min(3, maxResults) || threshold === 0) {
+      const minWowUsed =
+        threshold === 0
+          ? Math.max(1, passed[0]?.wowScore ?? 1)
+          : threshold;
+      return {
+        results: passed.slice(0, maxResults),
+        minWowUsed,
+      };
+    }
+  }
+  return { results: all.slice(0, maxResults), minWowUsed: 1 };
 }

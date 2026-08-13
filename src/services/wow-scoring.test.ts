@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { AliExpressListing } from "../types";
-import { computeWowHeuristic, passesWowGate, wowToDisplayScore } from "./wow-scoring";
+import { computeWowHeuristic, passesWowGate, pickImpressiveWowResults, wowToDisplayScore } from "./wow-scoring";
 
 describe("wow-scoring", () => {
   const clever: AliExpressListing = {
@@ -32,5 +32,16 @@ describe("wow-scoring", () => {
 
   it("maps wow to display score", () => {
     expect(wowToDisplayScore(8)).toBe(80);
+  });
+
+  it("always picks top results when pool is non-empty", () => {
+    const pool = [
+      { wowScore: 4, aliexpressId: "a" },
+      { wowScore: 6, aliexpressId: "b" },
+      { wowScore: 5, aliexpressId: "c" },
+    ];
+    const picked = pickImpressiveWowResults(pool, 2, 7, 6);
+    expect(picked.results.length).toBeGreaterThan(0);
+    expect(picked.results[0]!.aliexpressId).toBe("b");
   });
 });

@@ -21,6 +21,7 @@ import {
   isSuspiciousMetrics,
   passesDiscoveryGate,
 } from "../utils/listing-discovery";
+import { computeWowHeuristic } from "./wow-scoring";
 
 /**
  * AliExpress product extractor + search.
@@ -1657,5 +1658,18 @@ export class AliExpressService {
       .replaceAll("<", "&lt;")
       .replaceAll(">", "&gt;")
       .replaceAll('"', "&quot;");
+  }
+
+  /** Re-apply filters on a merged listing pool (scrape + API). */
+  refilterListings(
+    items: AliExpressListing[],
+    filters: ProductSearchFilters,
+  ): AliExpressListing[] {
+    const ranked = [...items].sort(
+      (a, b) =>
+        computeWowHeuristic(b, filters.query).wowScore -
+        computeWowHeuristic(a, filters.query).wowScore,
+    );
+    return this.applyClientFilters(ranked, filters);
   }
 }

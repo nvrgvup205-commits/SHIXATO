@@ -6,13 +6,18 @@ import {
   delayBeforeRequest,
   delayBetweenKeywordSearches,
 } from "../utils/rate-limiter";
+import { mapApiSearchProductToListing } from "./api-listing-mapper";
+import { AliExpressApi } from "./aliexpress-api";
 import { AliExpressService } from "./aliexpress";
+import {
+  hasAliExpressAccessToken,
+} from "./aliexpress-credentials";
 import { KeywordGeneratorService, type KeywordSource } from "./keyword-generator";
 import { WowAnalyzerService } from "./wow-analyzer";
 import {
   computeWowHeuristic,
   explainWowReject,
-  passesWowGate,
+  pickImpressiveWowResults,
   wowToDisplayScore,
 } from "./wow-scoring";
 
@@ -61,6 +66,7 @@ export interface AutoDiscoverResult {
   keywordsScanned: number;
   pagesPerKeyword: number;
   turbo: boolean;
+  apiListingsMerged?: number;
   totalRaw: number;
   totalUnique: number;
   totalPassedGate: number;
@@ -107,6 +113,61 @@ function computeWowStats(scores: number[]): WowScoreStats {
   };
 }
 
+function ingestListing(
+  byId: Map<string, ScoredDiscoverListing>,
+  item: AliExpressListing,
+  keyword: string,
+  requireProblemSolving: boolean,
+): void {
+  const heuristic = computeWowHeuristic(item, keyword);
+  if (heuristic.flags.includes("مرفوض")) return;
+
+  let wowScore = heuristic.wowScore;
+  if (requireProblemSolving && heuristic.problemClarity >= 7) {
+    wowScore = Math.min(10, wowScore + 1);
+  }
+
+  const scored = buildScoredListing(item, keyword, wowScore, heuristic.flags);
+  const existing = byId.get(item.aliexpressId);
+  if (!existing || scored.wowScore > existing.wowScore) {
+    byId.set(item.aliexpressId, scored);
+  }
+}
+
+async function mergeOfficialApiPool(
+  env: Env,
+  turbo: boolean,
+  currency: string,
+  keywords: string[],
+  byId: Map<string, ScoredDiscoverListing>,
+  requireProblemSolving: boolean,
+): Promise<number> {
+  if (!(await hasAliExpressAccessToken(env))) return 0;
+
+  try {
+    const api = await AliExpressApi.fromEnv(env);
+    const rows = await api.fetchRecommendFeed({
+      pages: turbo ? 6 : 4,
+      pageSize: 50,
+      strictKeyword: false,
+    });
+
+    let merged = 0;
+    for (const row of rows) {
+      const listing = mapApiSearchProductToListing(row, currency);
+      const keyword =
+        keywords.find((kw) =>
+          listing.title.toLowerCase().includes(kw.toLowerCase().split(/\s+/)[0] ?? ""),
+        ) ?? "api-bestseller";
+      const before = byId.size;
+      ingestListing(byId, listing, keyword, requireProblemSolving);
+      if (byId.size > before) merged += 1;
+    }
+    return merged;
+  } catch {
+    return 0;
+  }
+}
 function buildScoredListing(
   item: AliExpressListing,
   keyword: string,
@@ -155,11 +216,10 @@ export class AutoDiscoverService {
       Math.max(options.fetchPages ?? (turbo ? 6 : 3), 1),
       8,
     );
-    const requireProblemSolving =
-      options.requireProblemSolving ?? turbo;
-    const minWow = options.minWow ?? 7;
-    const fallbackMinWow = options.fallbackMinWow ?? 6;
-    const maxResults = Math.min(Math.max(options.maxResults ?? 12, 3), 24);
+    const requireProblemSolving = options.requireProblemSolving ?? false;
+    const minWow = options.minWow ?? (turbo ? 6 : 7);
+    const fallbackMinWow = options.fallbackMinWow ?? 5;
+    const maxResults = Math.min(Math.max(options.maxResults ?? 12, 6), 24);
 
     let keywords: string[] = [];
     let keywordSource: KeywordSource = "generated";
@@ -187,6 +247,19 @@ export class AutoDiscoverService {
     const errors: AutoDiscoverResult["errors"] = [];
     let totalRaw = 0;
     let scanned = 0;
+    let apiListingsMerged = 0;
+
+    if (options.env) {
+      apiListingsMerged = await mergeOfficialApiPool(
+        options.env,
+        turbo,
+        currency,
+        keywords,
+        byId,
+        requireProblemSolving,
+      );
+      totalRaw += apiListingsMerged;
+    }
 
     for (let i = 0; i < keywords.length; i += 1) {
       const keyword = keywords[i]!;
@@ -220,21 +293,7 @@ export class AutoDiscoverService {
         scanned += 1;
 
         for (const item of items) {
-          const heuristic = computeWowHeuristic(item, keyword);
-          if (heuristic.flags.includes("مرفوض")) continue;
-          if (requireProblemSolving && heuristic.problemClarity < 6) continue;
-
-          const scored = buildScoredListing(
-            item,
-            keyword,
-            heuristic.wowScore,
-            heuristic.flags,
-          );
-
-          const existing = byId.get(item.aliexpressId);
-          if (!existing || scored.wowScore > existing.wowScore) {
-            byId.set(item.aliexpressId, scored);
-          }
+          ingestListing(byId, item, keyword, requireProblemSolving);
         }
       } catch (err) {
         const message = err instanceof Error ? err.message : "فشل البحث";
@@ -279,15 +338,11 @@ export class AutoDiscoverService {
 
     const wowStats = computeWowStats(all.map((x) => x.wowScore));
 
-    let minWowUsed = minWow;
-    let passed = all.filter((item) => passesWowGate(item.wowScore, minWow));
+    const picked = pickImpressiveWowResults(all, maxResults, minWow, fallbackMinWow);
+    const minWowUsed = picked.minWowUsed;
+    const passed = all.filter((item) => item.wowScore >= minWowUsed);
 
-    if (passed.length < 3) {
-      minWowUsed = fallbackMinWow;
-      passed = all.filter((item) => passesWowGate(item.wowScore, fallbackMinWow));
-    }
-
-    const results = passed.slice(0, maxResults).map((item) => ({
+    const results = picked.results.map((item) => ({
       ...item,
       discoverRejected: false,
     }));
@@ -309,11 +364,13 @@ export class AutoDiscoverService {
     let warning: string | undefined;
     if (!results.length) {
       warning =
-        `ما في منتجات إبهار ${minWow}/10+ — أعلى إبهار: ${wowStats.maxWow}/10 — اضغط «عرض المُتجاهَل»`;
+        `لم نجد منتجات بعد ${scanned} كلمات — جرّب فئة أخرى أو أعد المحاولة`;
     } else if (minWowUsed < minWow) {
-      warning = `يوم أضعف — عرضنا ${results.length} منتج (إبهار ≥ ${minWowUsed})`;
+      warning = `عرضنا أفضل ${results.length} منتج (إبهار ≥ ${minWowUsed}/10)`;
+    } else if (apiListingsMerged > 0) {
+      warning = `دمجنا ${apiListingsMerged} منتج من API الرسمي مع السكرابينج`;
     } else if (results.length < 5) {
-      warning = `${results.length} منتج يثبت — راجع المُتجاهَل`;
+      warning = `${results.length} منتج يثبت — راجع المُتجاهَل للمزيد`;
     }
 
     const executionTimeSeconds = Math.round((Date.now() - start) / 100) / 10;
@@ -326,6 +383,7 @@ export class AutoDiscoverService {
       keywordsScanned: scanned,
       pagesPerKeyword: fetchPages,
       turbo,
+      apiListingsMerged,
       totalRaw,
       totalUnique: all.length,
       totalPassedGate: passed.length,

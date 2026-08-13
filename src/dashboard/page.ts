@@ -1216,43 +1216,49 @@ export function renderDashboardPage(storeDomain: string): string {
             keywordLimit: turbo ? 20 : 15,
             fetchPages: turbo ? 6 : 3,
             turbo,
-            requireProblemSolving: turbo,
-            minWow: 7,
-            maxResults: 12,
+            requireProblemSolving: false,
+            minWow: turbo ? 6 : 7,
+            maxResults: turbo ? 16 : 12,
           }),
         });
         const data = res.data || {};
         state.lastSearch = data;
         state.lastPreset = "auto-discover";
         const items = data.results || [];
+        const rejected = data.rejectedResults || [];
 
-        state.discoverApproved = items;
-        state.discoverRejected = data.rejectedResults || [];
+        state.discoverApproved = items.length ? items : rejected.slice(0, 16);
+        state.discoverRejected = rejected;
+
+        const displayItems = items.length ? items : rejected.slice(0, 16);
 
         const stats = data.wowStats || data.scoreStats || {};
         const minUsed = data.minWowUsed ?? data.minScoreUsed ?? 7;
         $("searchStatus").textContent =
           (data.turbo ? "توربو · " : "") +
-          "إبهار: " + items.length + " منتج يثبت (≥ " + minUsed + "/10) · مُتجاهَل " +
+          "إبهار: " + displayItems.length + " منتج" +
+          (items.length ? " مقبول" : rejected.length ? " (أفضل متاح)" : "") +
+          " (≥ " + minUsed + "/10) · مُتجاهَل " +
           (state.discoverRejected.length || 0) +
           " · أعلى إبهار " + (stats.maxWow ?? stats.maxScore ?? "—") + "/10" +
           " · متوسط " + (stats.medianWow ?? stats.medianScore ?? "—") +
           " · " + (data.keywordSource === "workers-ai" ? "كلمات AI" : "كلمات احتياطية") +
+          (data.apiListingsMerged ? " · API " + data.apiListingsMerged : "") +
           " · " + (data.keywordsScanned || 0) + " كلمات × " + (data.pagesPerKeyword || "?") + " صفحات · " +
           (data.totalUnique || 0) + " فريد · " +
           (data.executionTimeSeconds || 0) + " ثانية" +
           (data.warning ? (" — " + data.warning) : "");
 
         $("searchUrlRow").classList.add("hidden");
-        setSearchResults(items);
+        setSearchResults(displayItems);
         updateDiscoverActionButtons();
 
-        if (!items.length && state.discoverRejected.length) {
-          toast("لا مقبول — اضغط «عرض المُتجاهَل» لترى أفضل ما تم رفضه", true);
-        } else if (!items.length) {
-          toast(data.warning || "لا نتائج", true);
+        if (!displayItems.length) {
+          toast(data.warning || "لا نتائج — جرّب فئة أخرى", true);
+        } else if (!items.length && rejected.length) {
+          toast("عرضنا أفضل " + displayItems.length + " منتج متاح", true);
         } else {
-          toast("⚡ " + items.length + " منتج مقبول");
+          toast("⚡ " + displayItems.length + " منتج مبهر");
         }
       } catch (e) {
         $("searchStatus").textContent = "";

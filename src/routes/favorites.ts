@@ -92,8 +92,8 @@ favorites.post("/smart-search", requireAuth, async (c) => {
       shipToCountry: body.shipToCountry,
       currency: body.currency,
     });
-    const { AliExpressService } = await import("../services/aliexpress");
-    const data = await new AliExpressService().search(filters);
+    const { hybridAliExpressSearch } = await import("../services/hybrid-search");
+    const data = await hybridAliExpressSearch(c.env, filters);
     return c.json({
       ok: true,
       data: {
