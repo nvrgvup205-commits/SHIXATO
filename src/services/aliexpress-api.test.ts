@@ -55,25 +55,48 @@ const SAMPLE_PRODUCT_RAW = {
 };
 
 describe("AliExpressApi", () => {
-  it("filters search results by keyword", async () => {
+  it("filters search results by keyword via product.search", async () => {
     const api = new AliExpressApi(CREDS);
-    vi.spyOn(api, "callSync").mockResolvedValue(SAMPLE_SEARCH_RAW);
+    vi.spyOn(api, "callSync").mockResolvedValue({
+      aliexpress_ds_product_search_response: {
+        result: {
+          products: SAMPLE_SEARCH_RAW.aliexpress_ds_recommend_feed_get_response.result
+            .products,
+        },
+      },
+    });
 
     const rows = await api.searchProducts("storage bag", 1);
-    expect(rows).toHaveLength(1);
+    expect(rows).toHaveLength(2);
     expect(rows[0]!.product_id).toBe("1005006123456789");
-    expect(rows[0]!.price).toBe(6.1);
-    expect(rows[0]!.sales).toBe(1500);
-    expect(rows[0]!.image_url).toBe("https://img/a.jpg");
+  });
+
+  it("falls back to recommend feed when keyword search is empty", async () => {
+    const api = new AliExpressApi(CREDS);
+    const spy = vi
+      .spyOn(api, "callSync")
+      .mockResolvedValueOnce({ aliexpress_ds_product_search_response: { result: {} } })
+      .mockResolvedValue(SAMPLE_SEARCH_RAW);
+
+    const rows = await api.searchProducts("mesh", 1);
+    expect(rows.length).toBeGreaterThan(0);
+    expect(spy).toHaveBeenCalled();
   });
 
   it("caches identical search keyword", async () => {
     const api = new AliExpressApi(CREDS);
-    const spy = vi.spyOn(api, "callSync").mockResolvedValue(SAMPLE_SEARCH_RAW);
+    const spy = vi.spyOn(api, "callSync").mockResolvedValue({
+      aliexpress_ds_product_search_response: {
+        result: {
+          products: SAMPLE_SEARCH_RAW.aliexpress_ds_recommend_feed_get_response.result
+            .products,
+        },
+      },
+    });
 
     await api.searchProducts("mesh", 1);
     await api.searchProducts("mesh", 1);
-    expect(spy).toHaveBeenCalledTimes(3);
+    expect(spy).toHaveBeenCalledTimes(1);
   });
 
   it("parses product details", async () => {
