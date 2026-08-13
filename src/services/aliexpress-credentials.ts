@@ -55,15 +55,29 @@ export async function getAliExpressSecretDiagnostics(env: Env): Promise<{
   hasSupabaseSecret: boolean;
   secretSource: "env" | "supabase" | "none";
   secretLength: number;
+  /** First 12 hex chars of SHA-256(secret) — للتحقق بدون كشف السر */
+  secretFingerprint: string | null;
 }> {
   const envSecret = env.ALIEXPRESS_APP_SECRET?.trim();
   const dbSecret = (await readSetting(env, APP_SECRET_SETTING))?.trim();
   const secret = envSecret || dbSecret || "";
+  let secretFingerprint: string | null = null;
+  if (secret) {
+    const hash = await crypto.subtle.digest(
+      "SHA-256",
+      new TextEncoder().encode(secret),
+    );
+    secretFingerprint = Array.from(new Uint8Array(hash))
+      .map((b) => b.toString(16).padStart(2, "0"))
+      .join("")
+      .slice(0, 12);
+  }
   return {
     hasEnvSecret: Boolean(envSecret),
     hasSupabaseSecret: Boolean(dbSecret),
     secretSource: envSecret ? "env" : dbSecret ? "supabase" : "none",
     secretLength: secret.length,
+    secretFingerprint,
   };
 }
 
@@ -86,6 +100,7 @@ export async function getAliExpressCredentialStatus(env: Env): Promise<{
   appKeyMatches: boolean;
   secretSource: "env" | "supabase" | "none";
   secretLength: number;
+  secretFingerprint: string | null;
 }> {
   const [supabaseAppKey, supabaseAppSecret, resolvedAppKey, secretDiag] =
     await Promise.all([
@@ -112,6 +127,7 @@ export async function getAliExpressCredentialStatus(env: Env): Promise<{
     appKeyMatches: isExpectedAliExpressAppKey(appKey),
     secretSource: secretDiag.secretSource,
     secretLength: secretDiag.secretLength,
+    secretFingerprint: secretDiag.secretFingerprint,
   };
 }
 

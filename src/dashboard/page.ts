@@ -1526,7 +1526,9 @@ export function renderDashboardPage(storeDomain: string): string {
           "<div><strong>Token:</strong> " + (ok ? "موجود ✅" : "مفقود ❌") + "</div>" +
           (d.tokenExpiresAt ? "<div><strong>ينتهي:</strong> " + escapeHtml(d.tokenExpiresAt) + "</div>" : "") +
           (d.secretLength ? "<div><strong>Secret:</strong> " + escapeHtml(d.secretSource || "—") +
-            " · طول " + d.secretLength + " حرف</div>" : "") +
+            " · طول " + d.secretLength + " حرف" +
+            (d.secretFingerprint ? " · بصمة <code>" + escapeHtml(d.secretFingerprint) + "</code>" : "") +
+            "</div>" : "") +
           "<div><strong>Callback:</strong> <code style='font-size:.8rem'>" + escapeHtml(d.callbackUrl || "") + "</code></div>";
       } catch (e) {
         hint.textContent = "تعذّر قراءة حالة AliExpress";

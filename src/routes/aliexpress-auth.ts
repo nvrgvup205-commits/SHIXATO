@@ -226,6 +226,9 @@ aliexpressAuth.get("/aliexpress/test", requireAuth, async (c) => {
   const signatureError = /signature|IncompleteSignature|platform standards/i.test(
     check.error ?? "",
   );
+  const tokenError = /access token|IllegalAccessToken|invalid or expired/i.test(
+    check.error ?? "",
+  );
 
   return c.json({
     ok: check.valid,
@@ -236,16 +239,20 @@ aliexpressAuth.get("/aliexpress/test", requireAuth, async (c) => {
         ? "ok"
         : signatureError
           ? "bad_app_secret"
-          : "bad_access_token",
+          : tokenError
+            ? "bad_access_token"
+            : "unknown",
       appKey: creds.appKey,
       secretLength: creds.appSecret.length,
       tokenPreview: creds.accessToken.slice(0, 8) + "…",
       expiresAt: creds.tokenExpiresAt,
       hintAr: signatureError
-        ? "App Secret غلط أو فيه مسافة — انسخه من Console → Advanced Info → Cloudflare Secret ALIEXPRESS_APP_SECRET"
-        : check.valid
-          ? null
-          : "التوكن منتهي — اعمل OAuth من جديد (مش App Secret)",
+        ? "App Secret في Cloudflare لا يطابق Console — أعد لصقه (البصمة المطلوبة: df536a0b324c)"
+        : tokenError
+          ? "App Secret صحيح — Access Token منتهي. اعمل OAuth من جديد (لا تلصق App Secret في خانة التوكن)"
+          : check.valid
+            ? null
+            : check.error ?? "فشل التحقق",
     },
   });
 });
