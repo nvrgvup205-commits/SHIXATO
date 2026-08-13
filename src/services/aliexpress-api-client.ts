@@ -1,6 +1,7 @@
 import type { Env } from "../types";
 import { HttpError } from "../utils/http";
 import { isSuspiciousMetrics } from "../utils/listing-discovery";
+import { estimateReviewBreakdown, type ReviewBreakdown } from "../utils/review-breakdown";
 import { sleep } from "../utils/rate-limiter";
 import { AliExpressApiClient } from "./aliexpress-api";
 import { loadAliExpressCredentials } from "./aliexpress-credentials";
@@ -32,19 +33,45 @@ export interface AliExpressApiProductDetails {
   title: string;
   description?: string;
   price: number;
+  listPrice?: number;
+  discountPercent?: number;
   currency: string;
   sales?: number;
   rating?: number;
   reviews?: number;
+  reviewsBreakdown?: ReviewBreakdown | null;
   images: string[];
   link: string;
+  categoryId?: string;
+  categoryName?: string;
+  store?: {
+    id?: string;
+    name?: string;
+    country?: string;
+    rating?: number;
+  };
+  logistics?: {
+    shipFromCountry?: string;
+    shipToCountry: string;
+    packageWeight?: string;
+    packageLength?: string;
+    packageWidth?: string;
+    packageHeight?: string;
+    /** Seller processing + dispatch estimate from product API (days). */
+    deliveryTimeDays?: number;
+  };
+  attributes: Array<{ name: string; value: string }>;
+  badges: string[];
   variants: Array<{
     skuId?: string;
     title: string;
     price: number;
     currency: string;
     available: boolean;
+    stock?: number;
+    image?: string;
   }>;
+  shippingOptions: AliExpressShippingQuote[];
   shippingToSaudi: AliExpressShippingQuote | null;
   profit: {
     productCost: number;
@@ -56,6 +83,10 @@ export interface AliExpressApiProductDetails {
     profitMarginPercent: number;
     currency: string;
   };
+  suspiciousMetrics: boolean;
+  ai_ready: boolean;
+  can_analyze: boolean;
+  dataSource: "aliexpress_ds_api";
   raw?: Record<string, unknown>;
 }
 
@@ -186,10 +217,15 @@ export class AliExpressApiClientService {
   }
 
   async getProductDetails(productId: string): Promise<AliExpressApiProductDetails> {
+    return this.getFullProductProfile(productId);
+  }
+
+  /** Complete official DS API profile for a single product (SA defaults). */
+  async getFullProductProfile(productId: string): Promise<AliExpressApiProductDetails> {
     const id = productId.trim();
     if (!id) throw new HttpError(400, "productId is required");
 
-    const cacheKey = `product:${id}`;
+    const cacheKey = `profile:${id}`;
     const cached = this.cache.get<AliExpressApiProductDetails>(cacheKey);
     if (cached) return cached;
 
@@ -201,7 +237,8 @@ export class AliExpressApiClientService {
     });
 
     const product = this.parseProductNode(raw);
-    const shipping = await this.getShippingCost(id, 1).catch(() => null);
+    const shippingOptions = await this.getAllShippingOptions(id, 1).catch(() => []);
+    const shipping = shippingOptions[0] ?? null;
     const totalCost = product.price + (shipping?.amount ?? 0);
     const suggestedSellPrice = roundMoney(totalCost * this.markup);
     const profitAmount = roundMoney(suggestedSellPrice - totalCost);
@@ -210,9 +247,23 @@ export class AliExpressApiClientService {
         ? roundMoney((profitAmount / suggestedSellPrice) * 100)
         : 0;
 
+    const validation = this.validateProduct({
+      title: product.title,
+      price: product.price,
+      sales: product.sales,
+      rating: product.rating,
+      reviews: product.reviews,
+      images: product.images,
+    });
+
     const details: AliExpressApiProductDetails = {
       ...product,
+      shippingOptions,
       shippingToSaudi: shipping,
+      suspiciousMetrics: validation.reasons.includes("suspicious_metrics"),
+      ai_ready: validation.ai_ready,
+      can_analyze: validation.can_analyze,
+      dataSource: "aliexpress_ds_api",
       profit: {
         productCost: product.price,
         shippingCost: shipping?.amount ?? 0,
@@ -226,24 +277,26 @@ export class AliExpressApiClientService {
       raw,
     };
 
-    await this.audit("aliexpress_api:product_details", {
+    await this.audit("aliexpress_api:product_profile", {
       product_id: id,
       endpoint: SYNC_BASE,
-      shipping_amount: shipping?.amount ?? null,
+      shipping_options: shippingOptions.length,
+      sales: product.sales ?? null,
+      reviews: product.reviews ?? null,
     });
 
     this.cache.set(cacheKey, details);
     return details;
   }
 
-  async getShippingCost(
+  async getAllShippingOptions(
     productId: string,
     quantity: number,
-  ): Promise<AliExpressShippingQuote> {
+  ): Promise<AliExpressShippingQuote[]> {
     const id = productId.trim();
     const qty = Math.max(1, Math.min(quantity, 99));
-    const cacheKey = `freight:${id}:${qty}`;
-    const cached = this.cache.get<AliExpressShippingQuote>(cacheKey);
+    const cacheKey = `freight-all:${id}:${qty}`;
+    const cached = this.cache.get<AliExpressShippingQuote[]>(cacheKey);
     if (cached) return cached;
 
     const options = await this.transport.calculateFreight({
@@ -252,31 +305,36 @@ export class AliExpressApiClientService {
       shipToCountry: DEFAULT_SHIP_TO,
     });
 
+    const mapped = options
+      .map((opt) => ({
+        serviceName: opt.serviceName,
+        amount: opt.amount ?? 0,
+        currency: opt.currency ?? DEFAULT_CURRENCY,
+        estimatedDeliveryDays: opt.estimatedDeliveryTime,
+        trackingAvailable: opt.trackingAvailable,
+      }))
+      .sort((a, b) => a.amount - b.amount);
+
+    this.cache.set(cacheKey, mapped, 30 * 60 * 1000);
+    return mapped;
+  }
+
+  async getShippingCost(
+    productId: string,
+    quantity: number,
+  ): Promise<AliExpressShippingQuote> {
+    const options = await this.getAllShippingOptions(productId, quantity);
     if (!options.length) {
       throw new HttpError(502, "No shipping options returned for Saudi Arabia");
     }
-
-    const best = [...options].sort(
-      (a, b) => (a.amount ?? Number.POSITIVE_INFINITY) - (b.amount ?? Number.POSITIVE_INFINITY),
-    )[0];
-
-    const quote: AliExpressShippingQuote = {
-      serviceName: best.serviceName,
-      amount: best.amount ?? 0,
-      currency: best.currency ?? DEFAULT_CURRENCY,
-      estimatedDeliveryDays: best.estimatedDeliveryTime,
-      trackingAvailable: best.trackingAvailable,
-    };
-
+    const quote = options[0]!;
     await this.audit("aliexpress_api:shipping", {
-      product_id: id,
-      quantity: qty,
+      product_id: productId.trim(),
+      quantity,
       endpoint: SYNC_BASE,
       service: quote.serviceName,
       amount: quote.amount,
     });
-
-    this.cache.set(cacheKey, quote, 30 * 60 * 1000);
     return quote;
   }
 
@@ -388,29 +446,34 @@ export class AliExpressApiClientService {
     return mapped;
   }
 
-  private parseProductNode(raw: Record<string, unknown>): Omit<
-    AliExpressApiProductDetails,
-    "shippingToSaudi" | "profit" | "raw"
-  > {
+  private parseProductNode(raw: Record<string, unknown>): ParsedProductCore {
     const response =
       (raw.aliexpress_ds_product_get_response as Record<string, unknown>) || raw;
     const result = (response.result as Record<string, unknown>) || response;
     const base = (result.ae_item_base_info_dto as Record<string, unknown>) || result;
+    const storeNode = (result.ae_store_info as Record<string, unknown>) || {};
+    const packageNode = (result.package_info_dto as Record<string, unknown>) || {};
+    const logisticsNode = (result.logistics_info_dto as Record<string, unknown>) || {};
 
     const productId = String(
       base.product_id ?? result.product_id ?? result.item_id ?? "",
     );
     const title = String(base.subject ?? result.subject ?? result.title ?? "Untitled");
-    const price = toNumber(
-      base.sale_price ?? base.target_sale_price ?? result.sale_price ?? result.price,
-      0,
-    );
     const currency = String(
       base.currency_code ?? result.currency_code ?? DEFAULT_CURRENCY,
     );
-    const sales = toOptionalNumber(base.sales_count ?? result.sales_count ?? result.volume);
-    const rating = toOptionalNumber(base.avg_evaluation_rating ?? result.evaluate_rate);
-    const reviews = toOptionalNumber(base.evaluation_count ?? result.review_count);
+    const sales = toOptionalNumber(
+      base.sales_count ??
+        result.sales_count ??
+        result.lastest_volume ??
+        result.volume,
+    );
+    const rating = toOptionalNumber(
+      base.avg_evaluation_rating ?? result.avg_evaluation_rating ?? result.evaluate_rate,
+    );
+    const reviews = toOptionalNumber(
+      base.evaluation_count ?? result.evaluation_count ?? result.review_count,
+    );
     const images = extractImages(result);
     const link = `https://www.aliexpress.com/item/${productId}.html`;
 
@@ -419,26 +482,97 @@ export class AliExpressApiClientService {
       (result.sku_info_list as Record<string, unknown>[]) ||
       [];
 
-    const variants = skuNodes.map((sku) => ({
-      skuId: sku.sku_id ? String(sku.sku_id) : undefined,
-      title: String(sku.sku_attr ?? sku.sku_property_name ?? "Default"),
-      price: toNumber(sku.sku_price ?? sku.offer_sale_price ?? price, price),
-      currency,
-      available: sku.sku_stock != null ? Number(sku.sku_stock) > 0 : true,
-    }));
+    const variants = skuNodes.map((sku) => parseSkuVariant(sku, priceFallback(currency, skuNodes, base, result), currency));
+
+    const listPrice = pickListPrice(skuNodes, base, result);
+    const price = pickSalePrice(skuNodes, base, result, listPrice);
+    const discountPercent =
+      listPrice != null && listPrice > price && price > 0
+        ? Math.round(((listPrice - price) / listPrice) * 100)
+        : undefined;
+
+    const attrNodes =
+      (result.ae_item_properties as Record<string, unknown>[]) ||
+      (result.ae_item_property_dtos as Record<string, unknown>[]) ||
+      [];
+
+    const attributes = attrNodes
+      .map((row) => ({
+        name: String(row.attr_name ?? row.property_name ?? ""),
+        value: String(row.attr_value ?? row.property_value ?? ""),
+      }))
+      .filter((row) => row.name && row.value);
+
+    const badges = extractBadges(base, result);
+    const categoryId =
+      base.category_id != null
+        ? String(base.category_id)
+        : result.category_id != null
+          ? String(result.category_id)
+          : undefined;
+
+    const storeRating = toOptionalNumber(
+      storeNode.item_as_described_rating ??
+        storeNode.communication_rating ??
+        storeNode.shipping_speed_rating,
+    );
 
     return {
       productId,
       title,
       description: base.detail ? String(base.detail) : undefined,
       price,
+      listPrice,
+      discountPercent,
       currency,
       sales,
       rating,
       reviews,
+      reviewsBreakdown:
+        reviews != null && rating != null
+          ? estimateReviewBreakdown(reviews, rating)
+          : null,
       images,
       link,
-      variants: variants.length ? variants : [{ title: "Default", price, currency, available: true }],
+      categoryId,
+      categoryName: result.category_name ? String(result.category_name) : undefined,
+      store: storeNode.store_name
+        ? {
+            id: storeNode.store_id != null ? String(storeNode.store_id) : undefined,
+            name: String(storeNode.store_name),
+            rating: storeRating,
+          }
+        : undefined,
+      logistics: {
+        shipFromCountry: result.ship_from_country
+          ? String(result.ship_from_country)
+          : undefined,
+        shipToCountry: String(
+          logisticsNode.ship_to_country ?? DEFAULT_SHIP_TO,
+        ),
+        packageWeight:
+          packageNode.gross_weight != null
+            ? String(packageNode.gross_weight)
+            : undefined,
+        packageLength:
+          packageNode.package_length != null
+            ? String(packageNode.package_length)
+            : undefined,
+        packageWidth:
+          packageNode.package_width != null
+            ? String(packageNode.package_width)
+            : undefined,
+        packageHeight:
+          packageNode.package_height != null
+            ? String(packageNode.package_height)
+            : undefined,
+        deliveryTimeDays: toOptionalNumber(logisticsNode.delivery_time),
+      },
+      attributes,
+      badges,
+      variants: variants.length
+        ? variants
+        : [{ title: "Default", price, currency, available: true }],
     };
   }
 
@@ -463,6 +597,115 @@ export class AliExpressApiClientService {
       // Audit must not break API calls when Supabase is unavailable.
     }
   }
+}
+
+type ParsedProductCore = Omit<
+  AliExpressApiProductDetails,
+  | "shippingToSaudi"
+  | "profit"
+  | "raw"
+  | "shippingOptions"
+  | "suspiciousMetrics"
+  | "ai_ready"
+  | "can_analyze"
+  | "dataSource"
+>;
+
+function parseSkuVariant(
+  sku: Record<string, unknown>,
+  fallbackPrice: number,
+  currency: string,
+): AliExpressApiProductDetails["variants"][number] {
+  const props = (sku.aeop_s_k_u_propertys as Record<string, unknown>[]) || [];
+  const propLabel = props
+    .map((p) => String(p.sku_property_value ?? p.property_value_definition_name ?? ""))
+    .filter(Boolean)
+    .join(" / ");
+  const propImage = props.find((p) => p.sku_image)?.sku_image;
+
+  const stock =
+    toOptionalNumber(sku.sku_available_stock ?? sku.s_k_u_available_stock ?? sku.ipm_sku_stock) ??
+    undefined;
+
+  return {
+    skuId: sku.id ? String(sku.id) : sku.sku_id ? String(sku.sku_id) : undefined,
+    title: String(
+      propLabel || sku.sku_attr || sku.sku_property_name || sku.sku_code || "Default",
+    ),
+    price: toNumber(sku.offer_sale_price ?? sku.sku_price ?? sku.sale_price, fallbackPrice),
+    currency: String(sku.currency_code ?? currency),
+    available:
+      sku.sku_stock === false
+        ? false
+        : stock != null
+          ? stock > 0
+          : sku.sku_stock === true || sku.sku_stock == null,
+    stock,
+    image: propImage ? String(propImage) : undefined,
+  };
+}
+
+function priceFallback(
+  currency: string,
+  skuNodes: Record<string, unknown>[],
+  base: Record<string, unknown>,
+  result: Record<string, unknown>,
+): number {
+  if (skuNodes.length) {
+    const first = skuNodes[0]!;
+    return toNumber(first.offer_sale_price ?? first.sku_price, 0);
+  }
+  return toNumber(
+    base.sale_price ?? base.target_sale_price ?? result.sale_price ?? result.price,
+    0,
+  );
+}
+
+function pickSalePrice(
+  skuNodes: Record<string, unknown>[],
+  base: Record<string, unknown>,
+  result: Record<string, unknown>,
+  listPrice?: number,
+): number {
+  const skuPrices = skuNodes
+    .map((sku) => toNumber(sku.offer_sale_price ?? sku.sku_price, NaN))
+    .filter((n) => Number.isFinite(n) && n > 0);
+  if (skuPrices.length) return Math.min(...skuPrices);
+
+  const direct = toNumber(
+    base.sale_price ?? base.target_sale_price ?? result.sale_price ?? result.price,
+    0,
+  );
+  if (direct > 0) return direct;
+  return listPrice ?? 0;
+}
+
+function pickListPrice(
+  skuNodes: Record<string, unknown>[],
+  base: Record<string, unknown>,
+  result: Record<string, unknown>,
+): number | undefined {
+  const skuList = skuNodes
+    .map((sku) => toNumber(sku.sku_price ?? sku.offer_bulk_sale_price, NaN))
+    .filter((n) => Number.isFinite(n) && n > 0);
+  if (skuList.length) return Math.max(...skuList);
+
+  const direct = toOptionalNumber(
+    base.original_price ?? result.original_price ?? result.list_price,
+  );
+  return direct;
+}
+
+function extractBadges(
+  base: Record<string, unknown>,
+  result: Record<string, unknown>,
+): string[] {
+  const badges: string[] = [];
+  const status = String(base.product_status_type ?? result.product_status_type ?? "");
+  if (/on.?selling|online/i.test(status)) badges.push("on_sale");
+  if (result.platform_product_type) badges.push(String(result.platform_product_type));
+  if (result.is_choice === true || result.is_choice === "true") badges.push("choice");
+  return badges;
 }
 
 function toNumber(value: unknown, fallback: number): number {

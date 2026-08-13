@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { AliExpressApiClient } from "../services/aliexpress-api";
+import { AliExpressApiClientService } from "../services/aliexpress-api-client";
 import { loadAliExpressCredentials } from "../services/aliexpress-credentials";
 import { AliExpressService } from "../services/aliexpress";
 import { ImportPipeline } from "../services/pipeline";
@@ -35,6 +36,36 @@ products.post("/search", requireAuth, async (c) => {
   try {
     const data = await new AliExpressService().search(body);
     return c.json({ ok: true, data });
+  } catch (err) {
+    if (err instanceof HttpError) {
+      return c.json(
+        { ok: false, error: err.message, details: err.details ?? null },
+        err.status as 400 | 401 | 500 | 502,
+      );
+    }
+    throw err;
+  }
+});
+
+/** Official AliExpress DS product profile (requires OAuth access token) */
+products.get("/profile/:productId", requireAuth, async (c) => {
+  const productId = c.req.param("productId").trim();
+  if (!productId) {
+    return c.json({ ok: false, error: "productId مطلوب" }, 400);
+  }
+
+  try {
+    const client = await AliExpressApiClientService.fromEnv(c.env);
+    const data = await client.getFullProductProfile(productId);
+    return c.json({
+      ok: true,
+      data,
+      meta: {
+        source: "aliexpress_ds_api",
+        note_ar:
+          "التعليقات الإيجابية/السلبية تُقدَّر من متوسط النجوم — الـ API الرسمي لا يُرجع عددًا منفصلًا لكل نوع.",
+      },
+    });
   } catch (err) {
     if (err instanceof HttpError) {
       return c.json(
