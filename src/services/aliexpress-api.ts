@@ -240,7 +240,9 @@ export class AliExpressApi {
       result_count: mapped.length,
     });
 
-    this.cache.set(cacheKey, mapped, CACHE_TTL_MS);
+    if (mapped.length > 0) {
+      this.cache.set(cacheKey, mapped, CACHE_TTL_MS);
+    }
     return mapped;
   }
 
@@ -738,15 +740,19 @@ export function keywordRelevanceScore(title: string, keyword: string): number {
       .replace(/[^\w\s\u0600-\u06FF]+/g, " ")
       .trim();
   const titleHay = norm(title);
-  const tokens = norm(keyword)
-    .split(/\s+/)
-    .filter((t) => t.length > 2);
+  const phrase = norm(keyword);
+  if (!phrase) return 1;
+  if (titleHay.includes(phrase)) return 1;
+
+  const tokens = phrase.split(/\s+/).filter((t) => t.length > 1);
   if (!tokens.length) return 1;
+
   let hits = 0;
   for (const token of tokens) {
     if (titleHay.includes(token)) hits += 1;
   }
-  return hits / tokens.length;
+  if (hits === 0) return 0;
+  return Math.max(hits / tokens.length, 0.25);
 }
 
 function extractImages(node: Record<string, unknown>): string[] {

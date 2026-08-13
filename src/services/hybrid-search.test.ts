@@ -31,6 +31,17 @@ vi.mock("./aliexpress", () => ({
   })),
 }));
 
+const apiRow = {
+  product_id: "123",
+  title: "Kids Toy Car",
+  price: 9.99,
+  image_url: "https://img.test/1.jpg",
+  link: "https://www.aliexpress.com/item/123.html",
+  sales: 500,
+  rating: 4.8,
+  reviews: 120,
+};
+
 describe("hybridAliExpressSearch", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -39,49 +50,72 @@ describe("hybridAliExpressSearch", () => {
       async (_env: unknown, items: { aliexpressId: string }[]) =>
         items.map((l) => ({ ...l, enrichmentSources: ["api"] as const })),
     );
+    mockScrapeSearch.mockResolvedValue({
+      query: "kids toys",
+      page: 1,
+      searchUrl: "https://example.com",
+      filtersApplied: {},
+      results: [
+        {
+          aliexpressId: "456",
+          title: "Scrape Toy",
+          url: "https://www.aliexpress.com/item/456.html",
+          image: "https://img.test/2.jpg",
+          originalPrice: 5,
+          currency: "USD",
+        },
+      ],
+      resultsBeforeFilter: [
+        {
+          aliexpressId: "456",
+          title: "Scrape Toy",
+          url: "https://www.aliexpress.com/item/456.html",
+          image: "https://img.test/2.jpg",
+          originalPrice: 5,
+          currency: "USD",
+        },
+      ],
+      totalParsed: 1,
+      totalAfterFilter: 1,
+    });
   });
 
-  it("uses API only when token exists", async () => {
+  it("merges scrape + API when token exists", async () => {
     mockHasToken.mockResolvedValue(true);
-    mockFetchFeed.mockResolvedValue([
-      {
-        product_id: "123",
-        title: "Car Phone Holder",
-        price: 9.99,
-        image_url: "https://img.test/1.jpg",
-        link: "https://www.aliexpress.com/item/123.html",
-        sales: 500,
-        rating: 4.8,
-        reviews: 120,
-      },
-    ]);
+    mockFetchFeed.mockResolvedValue([apiRow]);
 
     const { hybridAliExpressSearch } = await import("./hybrid-search");
     const result = await hybridAliExpressSearch({} as Env, {
-      query: "car accessories",
+      query: "kids toys",
       currency: "USD",
     });
 
     expect(mockFetchFeed).toHaveBeenCalled();
-    expect(mockScrapeSearch).not.toHaveBeenCalled();
+    expect(mockScrapeSearch).toHaveBeenCalled();
+    expect(result.results.length).toBeGreaterThan(0);
+    expect(result.meta?.source).toBe("hybrid");
+  });
+
+  it("uses scrape when API feed is empty", async () => {
+    mockHasToken.mockResolvedValue(true);
+    mockFetchFeed.mockResolvedValue([]);
+
+    const { hybridAliExpressSearch } = await import("./hybrid-search");
+    const result = await hybridAliExpressSearch({} as Env, {
+      query: "kids toys",
+      currency: "USD",
+    });
+
+    expect(mockScrapeSearch).toHaveBeenCalled();
+    expect(result.meta?.source).toBe("scraping");
     expect(result.results).toHaveLength(1);
-    expect(result.meta?.source).toBe("api");
   });
 
   it("falls back to scraping without token", async () => {
     mockHasToken.mockResolvedValue(false);
-    mockScrapeSearch.mockResolvedValue({
-      query: "test",
-      page: 1,
-      searchUrl: "https://example.com",
-      filtersApplied: {},
-      results: [],
-      totalParsed: 0,
-      totalAfterFilter: 0,
-    });
 
     const { hybridAliExpressSearch } = await import("./hybrid-search");
-    const result = await hybridAliExpressSearch({} as Env, { query: "test" });
+    const result = await hybridAliExpressSearch({} as Env, { query: "kids toys" });
 
     expect(mockScrapeSearch).toHaveBeenCalled();
     expect(mockFetchFeed).not.toHaveBeenCalled();
