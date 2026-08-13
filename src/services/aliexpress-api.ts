@@ -376,7 +376,23 @@ export class AliExpressApi {
   }
 
   async createTokenFromCode(code: string): Promise<AliExpressTokenResponse> {
-    return this.callRest("/auth/token/create", { code });
+    const trimmed = code.trim();
+    const paths = [
+      { path: "/auth/token/security/create", extra: { uuid: crypto.randomUUID() } },
+      { path: "/auth/token/create", extra: {} },
+    ];
+    let lastError: unknown;
+    for (const { path, extra } of paths) {
+      try {
+        return await this.callRest(path, { code: trimmed, ...extra });
+      } catch (err) {
+        lastError = err;
+        if (!(err instanceof HttpError) || err.status !== 502) throw err;
+      }
+    }
+    throw lastError instanceof Error
+      ? lastError
+      : new HttpError(502, "فشل استبدال الكود");
   }
 
   async refreshToken(
@@ -386,7 +402,22 @@ export class AliExpressApi {
     if (!token) {
       throw new HttpError(400, "لا يوجد refresh token");
     }
-    return this.callRest("/auth/token/refresh", { refresh_token: token });
+    const paths = [
+      "/auth/token/security/refresh",
+      "/auth/token/refresh",
+    ];
+    let lastError: unknown;
+    for (const path of paths) {
+      try {
+        return await this.callRest(path, { refresh_token: token });
+      } catch (err) {
+        lastError = err;
+        if (!(err instanceof HttpError) || err.status !== 502) throw err;
+      }
+    }
+    throw lastError instanceof Error
+      ? lastError
+      : new HttpError(502, "فشل تجديد التوكن");
   }
 
   private async request(

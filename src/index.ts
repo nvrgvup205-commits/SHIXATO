@@ -48,6 +48,7 @@ app.get("/", (c) => {
       aliexpressCallbackAlias: "GET /api/aliexpress/callback",
       aliexpressStatus: "GET /api/auth/aliexpress/status",
       aliexpressSaveToken: "POST /api/auth/aliexpress/token",
+      aliexpressExchangeCode: "POST /api/auth/aliexpress/exchange-code",
       apiSearch: "POST /api/products/api-search",
       productProfile: "GET /api/products/profile/:id",
       freight: "POST /api/products/freight",

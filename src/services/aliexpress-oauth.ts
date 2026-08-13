@@ -11,10 +11,14 @@ import { sleep } from "../utils/rate-limiter";
 /** AliExpress Open Platform OAuth endpoints (official docs). */
 export const ALIEXPRESS_OAUTH_AUTHORIZE_URL =
   "https://api-sg.aliexpress.com/oauth/authorize";
-/** Signed token APIs live under /rest — AliExpress docs call this the token exchange step. */
+/** Signed token APIs live under /rest — AliExpress docs (2025+) use security/* paths. */
 export const ALIEXPRESS_OAUTH_TOKEN_REST_BASE = "https://api-sg.aliexpress.com/rest";
-export const ALIEXPRESS_OAUTH_TOKEN_CREATE_PATH = "/auth/token/create";
-export const ALIEXPRESS_OAUTH_TOKEN_REFRESH_PATH = "/auth/token/refresh";
+/** Primary — generateSecurityToken in Open Platform docs */
+export const ALIEXPRESS_OAUTH_TOKEN_CREATE_PATH = "/auth/token/security/create";
+/** Fallback for older app registrations */
+export const ALIEXPRESS_OAUTH_TOKEN_CREATE_LEGACY_PATH = "/auth/token/create";
+export const ALIEXPRESS_OAUTH_TOKEN_REFRESH_PATH = "/auth/token/security/refresh";
+export const ALIEXPRESS_OAUTH_TOKEN_REFRESH_LEGACY_PATH = "/auth/token/refresh";
 
 const MAX_RETRIES = 3;
 const RETRY_BASE_MS = 400;
@@ -65,18 +69,34 @@ export class AliExpressOAuth {
     return `${ALIEXPRESS_OAUTH_AUTHORIZE_URL}?${params.toString()}`;
   }
 
-  /** 2) استبدال authorization code بـ access token (مع إعادة المحاولة عند أخطاء الشبكة) */
+  /** 2) استبدال authorization code بـ access token (security API ثم fallback) */
   async exchangeCodeForToken(code: string): Promise<AliExpressOAuthToken> {
     const trimmed = code.trim();
     if (!trimmed) {
       throw new HttpError(400, "authorization code فارغ أو غير صالح");
     }
 
-    const raw = await this.withRetry(() =>
-      this.postSignedRest(ALIEXPRESS_OAUTH_TOKEN_CREATE_PATH, { code: trimmed }),
-    );
+    const uuid = crypto.randomUUID();
+    const paths = [
+      ALIEXPRESS_OAUTH_TOKEN_CREATE_PATH,
+      ALIEXPRESS_OAUTH_TOKEN_CREATE_LEGACY_PATH,
+    ];
 
-    return this.normalizeTokenResponse(raw);
+    let lastError: unknown;
+    for (const apiPath of paths) {
+      try {
+        const raw = await this.withRetry(() =>
+          this.postSignedRest(apiPath, { code: trimmed, uuid }),
+        );
+        return this.normalizeTokenResponse(raw);
+      } catch (err) {
+        lastError = err;
+        if (!(err instanceof HttpError) || err.status !== 502) throw err;
+      }
+    }
+    throw lastError instanceof Error
+      ? lastError
+      : new HttpError(502, "فشل استبدال الكود — تأكد أن الكود جديد ولم يُستخدم من قبل");
   }
 
   /** 3) تجديد access token عبر refresh token */
@@ -86,36 +106,56 @@ export class AliExpressOAuth {
       throw new HttpError(400, "refresh token مفقود");
     }
 
-    const raw = await this.withRetry(() =>
-      this.postSignedRest(ALIEXPRESS_OAUTH_TOKEN_REFRESH_PATH, {
-        refresh_token: trimmed,
-      }),
-    );
+    const paths = [
+      ALIEXPRESS_OAUTH_TOKEN_REFRESH_PATH,
+      ALIEXPRESS_OAUTH_TOKEN_REFRESH_LEGACY_PATH,
+    ];
 
-    return this.normalizeTokenResponse(raw);
+    let lastError: unknown;
+    for (const apiPath of paths) {
+      try {
+        const raw = await this.withRetry(() =>
+          this.postSignedRest(apiPath, { refresh_token: trimmed }),
+        );
+        return this.normalizeTokenResponse(raw);
+      } catch (err) {
+        lastError = err;
+        if (!(err instanceof HttpError) || err.status !== 502) throw err;
+      }
+    }
+    throw lastError instanceof Error
+      ? lastError
+      : new HttpError(502, "فشل تجديد التوكن");
   }
 
   /**
    * يتحقق أن AppKey + AppSecret يولّدان توقيعاً مقبولاً (بدون access token).
    */
   async probeAppSecret(): Promise<{ signatureOk: boolean; error?: string }> {
-    try {
-      await this.postSignedRest(ALIEXPRESS_OAUTH_TOKEN_CREATE_PATH, {
-        code: "shixato-signature-probe",
-      });
-      return { signatureOk: true };
-    } catch (err) {
-      const msg =
-        err instanceof HttpError
-          ? err.message
-          : err instanceof Error
+    const paths = [
+      ALIEXPRESS_OAUTH_TOKEN_CREATE_PATH,
+      ALIEXPRESS_OAUTH_TOKEN_CREATE_LEGACY_PATH,
+    ];
+    for (const apiPath of paths) {
+      try {
+        await this.postSignedRest(apiPath, {
+          code: "shixato-signature-probe",
+          uuid: "probe",
+        });
+        return { signatureOk: true };
+      } catch (err) {
+        const msg =
+          err instanceof HttpError
             ? err.message
-            : "فشل فحص التوقيع";
-      if (/signature|IncompleteSignature|platform standards/i.test(msg)) {
-        return { signatureOk: false, error: msg };
+            : err instanceof Error
+              ? err.message
+              : "فشل فحص التوقيع";
+        if (/signature|IncompleteSignature|platform standards/i.test(msg)) {
+          return { signatureOk: false, error: msg };
+        }
       }
-      return { signatureOk: true };
     }
+    return { signatureOk: true };
   }
 
   /** DS feed probe without access token — verifies AppKey+Secret on /rest. */
