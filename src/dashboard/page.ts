@@ -481,7 +481,7 @@ export function renderDashboardPage(storeDomain: string): string {
         </div>
         </details>
 
-        <p class="hint">نصيحة: اختر الفئة ثم 🥈 متوسط — أو اترك «فلتر صارم» غير مفعّل لنتائج أكثر.</p>
+        <p class="hint">نصيحة: اختر الفئة ثم اضغط «بحث» — كل النتائج تظهر مرتّبة. فلتر المبهر يدويًا بعدين.</p>
         <div id="searchStatus" class="hint"></div>
         <div id="searchUrlRow" class="hidden" style="margin:.35rem 0">
           <a class="btn btn-ghost" id="openSearchAe" href="#" target="_blank" rel="noopener" style="text-decoration:none;font-size:.85rem">
@@ -816,7 +816,7 @@ export function renderDashboardPage(storeDomain: string): string {
         query: $("query").value.trim(),
         category: $("category").value || undefined,
         page: 1,
-        sort: $("sort").value,
+        sort: $("sort").value || "orders",
         minPrice: num("minPrice"),
         maxPrice: num("maxPrice"),
         currency: $("currency").value,
@@ -839,11 +839,10 @@ export function renderDashboardPage(storeDomain: string): string {
         targetSellingPrice: num("targetSellingPrice"),
         minMarginPercent: num("minMarginPercent"),
         locale: $("locale").value || "ar",
-        applyUrlFilters: strict,
+        applyUrlFilters: false,
         filterMode: strict ? "strict" : "soft",
-        discoveryMode: !strict,
-        minLaunchYear: strict ? undefined : new Date().getUTCFullYear(),
-        fetchPages: strict ? 1 : 2,
+        discoveryMode: true,
+        fetchPages: strict ? 2 : 5,
       };
     }
 
@@ -1224,11 +1223,11 @@ export function renderDashboardPage(storeDomain: string): string {
             shipToCountry: $("shipToCountry").value,
             currency: $("currency").value,
             keywordLimit: turbo ? 20 : 15,
-            fetchPages: turbo ? 6 : 3,
+            fetchPages: turbo ? 8 : 5,
             turbo,
             requireProblemSolving: false,
-            minWow: turbo ? 6 : 7,
-            maxResults: turbo ? 16 : 12,
+            minWow: turbo ? 4 : 5,
+            maxResults: turbo ? 48 : 36,
           }),
         });
         const data = res.data || {};

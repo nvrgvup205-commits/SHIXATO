@@ -1,3 +1,4 @@
+import { buildSearchKeywordChain } from "../data/category-keywords";
 import { resolveSearchQuery } from "../data/categories";
 import type {
   AliExpressListing,
@@ -19,7 +20,13 @@ export type HybridSearchMeta = {
   apiMerged?: number;
   enrichedCount?: number;
   scrapeCount?: number;
+  keywordsTried?: string[];
+  keywordFallbackUsed?: boolean;
 };
+
+const MAX_RESULTS_DISPLAY = 120;
+const MIN_POOL_BEFORE_FALLBACK = 12;
+const KEYWORD_FALLBACK_LIMIT = 8;
 
 function mergeListings(
   primary: AliExpressListing[],
@@ -52,10 +59,12 @@ function normalizeFilters(filters: ProductSearchFilters): ProductSearchFilters {
     currency: (filters.currency || "USD").toUpperCase(),
     shipToCountry: (filters.shipToCountry || "SA").toUpperCase(),
     locale: filters.locale === "en" ? "en" : "ar",
-    filterMode:
-      filters.filterMode ?? (filters.presetGrade ? "soft" : "strict"),
-    applyUrlFilters:
-      filters.applyUrlFilters ?? (filters.presetGrade ? false : true),
+    filterMode: filters.filterMode ?? "soft",
+    applyUrlFilters: filters.applyUrlFilters ?? false,
+    fetchPages: Math.min(
+      Math.max(filters.fetchPages ?? 4, 1),
+      8,
+    ),
   };
 }
 
@@ -76,7 +85,7 @@ async function fetchApiListings(
 
   if (pool.length < 12) {
     const broader = await api.fetchRecommendFeed({
-      pages: Math.min(fetchPages + 2, 6),
+      pages: Math.min(fetchPages + 2, 8),
       strictKeyword: false,
     });
     pool = mergeListings(
@@ -96,9 +105,83 @@ async function fetchScrapeListings(
   try {
     return await service.search({ ...filters, query: resolvedQuery });
   } catch (err) {
-    console.warn("scrape search failed", err);
+    console.warn("scrape search failed", resolvedQuery, err);
     return null;
   }
+}
+
+async function fetchPoolForKeyword(
+  env: Env,
+  filters: ProductSearchFilters,
+  keyword: string,
+  hasToken: boolean,
+): Promise<{ pool: AliExpressListing[]; scrape: AliExpressSearchResult | null }> {
+  const fetchPages = filters.fetchPages ?? 4;
+
+  const [apiPool, scrapeResult] = await Promise.all([
+    hasToken
+      ? fetchApiListings(env, keyword, fetchPages, filters.currency).catch(
+          () => [] as AliExpressListing[],
+        )
+      : Promise.resolve([] as AliExpressListing[]),
+    fetchScrapeListings(filters, keyword),
+  ]);
+
+  const scrapePool =
+    scrapeResult?.resultsBeforeFilter ?? scrapeResult?.results ?? [];
+  const pool = mergeListings(scrapePool, apiPool);
+
+  return { pool, scrape: scrapeResult };
+}
+
+async function fetchWithKeywordFallback(
+  env: Env,
+  filters: ProductSearchFilters,
+  resolved: ReturnType<typeof resolveSearchQuery>,
+  hasToken: boolean,
+): Promise<{
+  pool: AliExpressListing[];
+  scrapeResult: AliExpressSearchResult | null;
+  keywordsTried: string[];
+  keywordFallbackUsed: boolean;
+}> {
+  const keywords = buildSearchKeywordChain(
+    resolved.query,
+    resolved.categoryId,
+    KEYWORD_FALLBACK_LIMIT,
+  );
+
+  let pool: AliExpressListing[] = [];
+  let scrapeResult: AliExpressSearchResult | null = null;
+  let keywordFallbackUsed = false;
+
+  for (let i = 0; i < keywords.length; i += 1) {
+    const keyword = keywords[i]!;
+    const result = await fetchPoolForKeyword(env, filters, keyword, hasToken);
+
+    if (!scrapeResult && result.scrape) scrapeResult = result.scrape;
+    pool = mergeListings(pool, result.pool);
+
+    if (i > 0) keywordFallbackUsed = true;
+    if (pool.length >= MIN_POOL_BEFORE_FALLBACK) break;
+  }
+
+  // Retry primary query in English locale if Arabic scrape returned nothing
+  if (pool.length < 6 && filters.locale !== "en") {
+    const enFilters = { ...filters, locale: "en" as const };
+    const enResult = await fetchPoolForKeyword(
+      env,
+      enFilters,
+      resolved.query,
+      hasToken,
+    );
+    if (!scrapeResult && enResult.scrape) scrapeResult = enResult.scrape;
+    const before = pool.length;
+    pool = mergeListings(pool, enResult.pool);
+    if (pool.length > before) keywordFallbackUsed = true;
+  }
+
+  return { pool, scrapeResult, keywordsTried: keywords, keywordFallbackUsed };
 }
 
 function buildSearchShell(
@@ -132,6 +215,28 @@ function buildSearchShell(
   };
 }
 
+function finalizeResults(
+  pool: AliExpressListing[],
+  ranked: AliExpressListing[],
+  normalized: ProductSearchFilters,
+  resolved: ReturnType<typeof resolveSearchQuery>,
+): AliExpressListing[] {
+  const service = new AliExpressService();
+
+  if (normalized.filterMode === "off") {
+    return ranked.slice(0, MAX_RESULTS_DISPLAY);
+  }
+
+  const filtered = service.refilterListings(ranked, normalized);
+
+  // Always return results when we have a pool — user filters manually afterward
+  if (filtered.length > 0) {
+    return filtered.slice(0, MAX_RESULTS_DISPLAY);
+  }
+
+  return ranked.slice(0, MAX_RESULTS_DISPLAY);
+}
+
 async function runHybridSearch(
   env: Env,
   filters: ProductSearchFilters,
@@ -155,26 +260,10 @@ async function runHybridSearch(
   }
 
   const normalized = normalizeFilters({ ...filters, query: resolved.query });
-  const fetchPages = Math.min(
-    Math.max(normalized.fetchPages ?? (normalized.presetGrade ? 2 : 3), 1),
-    8,
-  );
+  const fetchPages = normalized.fetchPages ?? 4;
 
-  const [apiPool, scrapeResult] = await Promise.all([
-    hasToken
-      ? fetchApiListings(env, resolved.query, fetchPages, normalized.currency).catch(
-          (err) => {
-            console.warn("API feed search failed", err);
-            return [] as AliExpressListing[];
-          },
-        )
-      : Promise.resolve([] as AliExpressListing[]),
-    fetchScrapeListings(normalized, resolved.query),
-  ]);
-
-  const scrapePool =
-    scrapeResult?.resultsBeforeFilter ?? scrapeResult?.results ?? [];
-  const pool = mergeListings(scrapePool, apiPool);
+  const { pool, scrapeResult, keywordsTried, keywordFallbackUsed } =
+    await fetchWithKeywordFallback(env, normalized, resolved, hasToken);
 
   if (pool.length === 0) {
     throw new HttpError(
@@ -185,20 +274,24 @@ async function runHybridSearch(
     );
   }
 
-  const service = new AliExpressService();
+  const scrapePool =
+    scrapeResult?.resultsBeforeFilter ?? scrapeResult?.results ?? [];
   const ranked = rankByImpressiveness(pool, resolved.query);
-  let results = service.refilterListings(ranked, normalized);
+  const results = finalizeResults(pool, ranked, normalized, resolved);
 
-  const enrichTarget = (results.length ? results : ranked).slice(0, 12);
+  const enrichTarget = results.slice(0, 16);
   let enrichedCount = 0;
   if (hasToken && enrichTarget.length) {
     const enrichedRaw = await enrichListingsFromApi(env, enrichTarget, {
-      limit: 12,
-      concurrency: 3,
+      limit: 16,
+      concurrency: 4,
     });
     const enriched = Array.isArray(enrichedRaw) ? enrichedRaw : enrichTarget;
     const enrichedMap = new Map(enriched.map((l) => [l.aliexpressId, l]));
-    results = results.map((l) => enrichedMap.get(l.aliexpressId) ?? l);
+    for (let i = 0; i < results.length; i += 1) {
+      const hit = enrichedMap.get(results[i]!.aliexpressId);
+      if (hit) results[i] = hit;
+    }
     enrichedCount = enriched.filter((l) =>
       l.enrichmentSources?.includes("api"),
     ).length;
@@ -206,25 +299,28 @@ async function runHybridSearch(
 
   const apiMerged = Math.max(0, pool.length - scrapePool.length);
   const source: HybridSearchMeta["source"] =
-    apiPool.length && scrapePool.length
+    apiMerged > 0 && scrapePool.length > 0
       ? "hybrid"
-      : apiPool.length
+      : apiMerged > 0
         ? "api"
         : "scraping";
 
   let warning = scrapeResult?.warning;
-  if (source === "api" && scrapePool.length === 0) {
+  if (keywordFallbackUsed) {
+    warning = `بحثنا ${keywordsTried.length} كلمات — ${pool.length} منتج (${results.length} معروض)`;
+  } else if (source === "api" && scrapePool.length === 0) {
     warning =
       "بحث API (منتجات رائجة) — للنتائج الأدق اختر فئة + كلمة بحث معاً";
-  } else if (source === "scraping" && apiPool.length === 0 && hasToken) {
+  } else if (source === "scraping" && apiMerged === 0 && hasToken) {
     warning =
       warning ??
       "البحث عبر الموقع — API لم يُرجع نتائج إضافية لهذه الكلمة";
   } else if (source === "hybrid") {
-    warning = `دمجنا ${scrapePool.length} من البحث + ${apiMerged} من API الرسمي`;
+    warning = `دمجنا ${scrapePool.length} من البحث + ${apiMerged} من API الرسمي · ${results.length} معروض`;
     if (enrichedCount > 0) warning += ` · ${enrichedCount} مُثرى`;
-  } else if (enrichedCount > 0) {
-    warning = `${results.length} منتج · ${enrichedCount} مُثرى بالتفاصيل`;
+  } else {
+    warning = `${results.length} منتج مرتّب حسب الإبهار — رتّب/فلتر يدويًا بعد العرض`;
+    if (enrichedCount > 0) warning += ` · ${enrichedCount} مُثرى`;
   }
 
   const shell = buildSearchShell(
@@ -234,29 +330,6 @@ async function runHybridSearch(
     scrapeResult,
     source,
   );
-
-  if (pool.length > 0 && results.length === 0) {
-    const top = ranked.slice(0, Math.min(24, ranked.length));
-    return {
-      ...shell,
-      results: top,
-      resultsBeforeFilter: pool,
-      totalParsed: pool.length,
-      totalAfterFilter: top.length,
-      warning:
-        warning ??
-        "الفلاتر شديدة — عرضنا أفضل المنتجات المرتبة بدون فلتر صارم",
-      apiMerged,
-      enrichedCount,
-      meta: {
-        source,
-        apiEnrichmentAvailable: hasToken,
-        apiMerged,
-        enrichedCount,
-        scrapeCount: scrapePool.length,
-      },
-    };
-  }
 
   return {
     ...shell,
@@ -273,12 +346,15 @@ async function runHybridSearch(
       apiMerged,
       enrichedCount,
       scrapeCount: scrapePool.length,
+      keywordsTried,
+      keywordFallbackUsed,
     },
   };
 }
 
 /**
  * Hybrid search — scrape (keyword) + API feed merged, enriched when token exists.
+ * Multi-keyword fallback ensures results even when primary query is empty/blocked.
  */
 export async function hybridAliExpressSearch(
   env: Env,
@@ -325,15 +401,36 @@ export async function searchListingsForKeyword(
         sort: "orders",
         filterMode: "off",
         applyUrlFilters: false,
-        fetchPages: Math.min(options.fetchPages, 3),
+        fetchPages: Math.min(options.fetchPages, 6),
         currency: options.currency,
         shipToCountry: "SA",
-        discoveryMode: true,
+        discoveryMode: false,
       },
       keyword,
     );
     const scrapeItems = scrape?.resultsBeforeFilter ?? scrape?.results ?? [];
     listings = mergeListings(scrapeItems, listings);
+  }
+
+  // English locale fallback for blocked Arabic pages
+  if (listings.length < 4) {
+    const enScrape = await fetchScrapeListings(
+      {
+        query: keyword,
+        page: 1,
+        locale: "en",
+        sort: "orders",
+        filterMode: "off",
+        applyUrlFilters: false,
+        fetchPages: Math.min(options.fetchPages, 4),
+        currency: options.currency,
+        shipToCountry: "SA",
+        discoveryMode: false,
+      },
+      keyword,
+    );
+    const enItems = enScrape?.resultsBeforeFilter ?? enScrape?.results ?? [];
+    listings = mergeListings(enItems, listings);
   }
 
   const enrichLimit = options.enrichLimit ?? 0;

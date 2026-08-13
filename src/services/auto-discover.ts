@@ -212,13 +212,13 @@ export class AutoDiscoverService {
       20,
     );
     const fetchPages = Math.min(
-      Math.max(options.fetchPages ?? (turbo ? 6 : 3), 1),
+      Math.max(options.fetchPages ?? (turbo ? 8 : 5), 1),
       8,
     );
     const requireProblemSolving = options.requireProblemSolving ?? false;
-    const minWow = options.minWow ?? (turbo ? 6 : 7);
-    const fallbackMinWow = options.fallbackMinWow ?? 5;
-    const maxResults = Math.min(Math.max(options.maxResults ?? 12, 6), 24);
+    const minWow = options.minWow ?? (turbo ? 4 : 5);
+    const fallbackMinWow = options.fallbackMinWow ?? 3;
+    const maxResults = Math.min(Math.max(options.maxResults ?? (turbo ? 48 : 36), 12), 72);
 
     let keywords: string[] = [];
     let keywordSource: KeywordSource = "generated";
@@ -345,7 +345,7 @@ export class AutoDiscoverService {
     const resultIds = new Set(results.map((r) => r.aliexpressId));
     const rejectedResults = all
       .filter((item) => !resultIds.has(item.aliexpressId))
-      .slice(0, 30)
+      .slice(0, 60)
       .map((item) => ({
         ...item,
         discoverRejected: true,
