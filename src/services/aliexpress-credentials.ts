@@ -122,6 +122,11 @@ export async function saveAliExpressAppCredentials(
   await db.setSetting(APP_SECRET_SETTING, input.appSecret.trim());
 }
 
+export async function hasAliExpressAccessToken(env: Env): Promise<boolean> {
+  const creds = await loadAliExpressCredentials(env);
+  return Boolean(creds?.accessToken?.trim());
+}
+
 export async function saveAliExpressTokens(
   env: Env,
   tokens: {

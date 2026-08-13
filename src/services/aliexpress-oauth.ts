@@ -97,28 +97,53 @@ export class AliExpressOAuth {
   async validateToken(
     accessToken: string,
     options?: { expiresAt?: string | null },
-  ): Promise<boolean> {
+  ): Promise<{ valid: boolean; error?: string }> {
     const token = accessToken.trim();
-    if (!token) return false;
+    if (!token) return { valid: false, error: "token فارغ" };
 
     if (options?.expiresAt) {
       const expiresMs = Date.parse(options.expiresAt);
       if (Number.isFinite(expiresMs) && expiresMs <= Date.now() + 30_000) {
-        return false;
+        return { valid: false, error: "انتهت صلاحية التوكن" };
       }
     }
 
-    try {
-      await this.withRetry(() =>
-        this.postSignedSync("aliexpress.ds.recommend.feed.get", {
+    const probes: Array<{ method: string; params: Record<string, string> }> = [
+      {
+        method: "aliexpress.ds.recommend.feed.get",
+        params: {
           feed_name: "DS bestseller",
+          country: "SA",
+          target_currency: "USD",
+          target_language: "EN",
           page_size: "1",
-        }, token),
-      );
-      return true;
-    } catch {
-      return false;
+        },
+      },
+      {
+        method: "aliexpress.ds.product.get",
+        params: {
+          product_id: "1005006123456789",
+          ship_to_country: "SA",
+          target_currency: "USD",
+          target_language: "EN",
+        },
+      },
+    ];
+
+    let lastError = "AliExpress رفض التوكن";
+    for (const probe of probes) {
+      try {
+        await this.withRetry(() =>
+          this.postSignedSync(probe.method, probe.params, token),
+        );
+        return { valid: true };
+      } catch (err) {
+        lastError =
+          err instanceof HttpError ? err.message : "فشل التحقق من التوكن";
+      }
     }
+
+    return { valid: false, error: lastError };
   }
 
   /** توقيع state parameter لمنع CSRF (AliExpress لا يتطلب PKCE حالياً) */

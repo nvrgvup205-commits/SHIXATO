@@ -31,4 +31,10 @@ describe("renderDashboardPage", () => {
     expect(html).toContain('id="autoDiscoverBtn"');
     expect(html).toContain("اكتشاف تلقائي مبهر");
   });
+
+  it("includes AliExpress settings panel", () => {
+    const html = renderDashboardPage("test.myshopify.com");
+    expect(html).toContain('id="aeSaveTokenBtn"');
+    expect(html).toContain("ربط AliExpress API");
+  });
 });

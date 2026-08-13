@@ -186,6 +186,11 @@ export interface AliExpressListing {
     score?: number;
     suggestedSellingPrice?: number;
   };
+  /** PDP / API enrichment for AI scoring */
+  enrichmentSources?: Array<"scrape" | "api">;
+  descriptionEn?: string;
+  categoryName?: string;
+  storeName?: string;
 }
 
 export interface AliExpressSearchResult {

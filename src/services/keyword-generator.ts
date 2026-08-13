@@ -19,7 +19,7 @@ export interface GeneratedKeywordsResult {
 export class KeywordGeneratorService {
   constructor(private env: Env) {}
 
-  async forCategory(categoryId: string, limit = 15): Promise<GeneratedKeywordsResult> {
+  async forCategory(categoryId: string, limit = 20): Promise<GeneratedKeywordsResult> {
     const id = categoryId.trim().toLowerCase();
     const cat = findCategory(id);
     if (!cat) {
@@ -78,13 +78,14 @@ Year: ${year}
 
 Return ONLY JSON: {"keywords":["english keyword 1","keyword 2",...]}
 
-Strategy — PROBLEM-FIRST keywords (not boring generic):
+Strategy — PROBLEM-FIRST trendy keywords (not boring generic):
 - Exactly ${limit} keywords, English, 2-6 words each
 - Each keyword = a PAIN POINT or SCROLL-STOPPER product people instantly understand
 - Think: "what makes a human stop scrolling and say this solves my problem?"
 - Mix: organizers, holders, fixers, smart tools, space savers, life hacks, clever gadgets
 - Diversify sub-problems within the category — no near-duplicates
-- Viral/TikTok-friendly ${year} angles where natural
+- Viral/TikTok-friendly ${year} angles where natural — trending problem-solvers only
+- Prefer keywords that imply a SPECIFIC fix (gap filler, cord organizer, under-sink pull out)
 
 BANNED in keywords: wholesale, bulk, random style, sticker, assorted, replica, coloring book, lot of
 
