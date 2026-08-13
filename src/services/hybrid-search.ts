@@ -275,9 +275,12 @@ export async function searchListingsForKeyword(
   let listings = rows.map((row) =>
     mapApiSearchProductToListing(row, options.currency),
   );
-  listings = await enrichListingsFromApi(env, listings, {
-    limit: options.enrichLimit ?? 20,
-    concurrency: 4,
-  });
+  const enrichLimit = options.enrichLimit ?? 20;
+  if (enrichLimit > 0) {
+    listings = await enrichListingsFromApi(env, listings, {
+      limit: enrichLimit,
+      concurrency: 4,
+    });
+  }
   return listings;
 }

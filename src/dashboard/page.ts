@@ -516,7 +516,7 @@ export function renderDashboardPage(storeDomain: string): string {
             </label>
             <label class="check"><input id="postChoiceOnly" type="checkbox" /> Choice فقط</label>
             <label class="check"><input id="postHighRated" type="checkbox" /> تقييم 4.5+</label>
-            <label class="check"><input id="postHideSuspicious" type="checkbox" checked /> إخفاء أرقام مشبوهة</label>
+            <label class="check"><input id="postHideSuspicious" type="checkbox" /> إخفاء أرقام مشبوهة</label>
             <label class="check"><input id="postCurrentYear" type="checkbox" /> سنة 2026 فقط</label>
             <button class="btn btn-ghost" id="postFilterReset" type="button">إعادة ضبط</button>
           </div>
@@ -1144,6 +1144,8 @@ export function renderDashboardPage(storeDomain: string): string {
     }
 
     function itemIsSuspicious(item) {
+      if (item.wowScore != null && Number(item.wowScore) >= 6) return false;
+      if (item.discoverFinalScore != null && Number(item.discoverFinalScore) >= 55) return false;
       if (item.suspiciousMetrics != null) return Boolean(item.suspiciousMetrics);
       const sold = item.soldCount ?? 0;
       const reviews = item.reviewCount ?? 0;
@@ -1258,7 +1260,7 @@ export function renderDashboardPage(storeDomain: string): string {
           (data.warning ? (" — " + data.warning) : "");
 
         $("searchUrlRow").classList.add("hidden");
-        setSearchResults(displayItems);
+        setSearchResults(displayItems, { mode: "discover" });
         updateDiscoverActionButtons();
 
         if (!displayItems.length) {
@@ -1299,16 +1301,47 @@ export function renderDashboardPage(storeDomain: string): string {
       const opts = readPostFilterOptions();
       const currentYear = new Date().getUTCFullYear();
       let items = base.slice();
+      let filtersActive = false;
 
-      if (opts.hideSuspicious) items = items.filter((i) => !itemIsSuspicious(i));
-      if (opts.currentYearOnly) {
-        items = items.filter((i) => itemLaunchYear(i) === currentYear || i.isCurrentYear);
+      if (opts.hideSuspicious) {
+        const next = items.filter((i) => !itemIsSuspicious(i));
+        if (next.length !== items.length) filtersActive = true;
+        items = next;
       }
-      if (opts.shipping === "free") items = items.filter(itemIsFreeShipping);
-      else if (opts.shipping === "paid") items = items.filter((i) => !itemIsFreeShipping(i));
+      if (opts.currentYearOnly) {
+        const next = items.filter(
+          (i) => itemLaunchYear(i) === currentYear || i.isCurrentYear,
+        );
+        if (next.length !== items.length) filtersActive = true;
+        items = next;
+      }
+      if (opts.shipping === "free") {
+        const next = items.filter(itemIsFreeShipping);
+        if (next.length !== items.length) filtersActive = true;
+        items = next;
+      } else if (opts.shipping === "paid") {
+        const next = items.filter((i) => !itemIsFreeShipping(i));
+        if (next.length !== items.length) filtersActive = true;
+        items = next;
+      }
 
-      if (opts.choiceOnly) items = items.filter((i) => i.isChoice);
-      if (opts.highRated) items = items.filter((i) => (Number(i.rating) || 0) >= 4.5);
+      if (opts.choiceOnly) {
+        const next = items.filter((i) => i.isChoice);
+        if (next.length !== items.length) filtersActive = true;
+        items = next;
+      }
+      if (opts.highRated) {
+        const next = items.filter((i) => (Number(i.rating) || 0) >= 4.5);
+        if (next.length !== items.length) filtersActive = true;
+        items = next;
+      }
+
+      let fallbackUsed = false;
+      if (items.length === 0 && base.length > 0) {
+        items = base.slice();
+        fallbackUsed = true;
+        $("filterActions").classList.remove("hidden");
+      }
 
       if (opts.sort === "discovery_desc") {
         items.sort((a, b) => itemDiscoveryScore(b) - itemDiscoveryScore(a));
@@ -1319,26 +1352,35 @@ export function renderDashboardPage(storeDomain: string): string {
       else if (opts.sort === "rating_desc") items.sort((a, b) => (Number(b.rating) || 0) - (Number(a.rating) || 0));
 
       renderResults(items);
-      $("postFilterStatus").textContent =
-        "عرض " + items.length + " من " + base.length + " نتيجة (فلترة محلية — صادقة + تميّز)";
+      if (fallbackUsed) {
+        $("postFilterStatus").textContent =
+          "⚠️ الفلاتر المحلية أخفت كل النتائج — عرضنا الكل (" + base.length + ") — ألغِ «إخفاء أرقام مشبوهة» للتصفية";
+      } else if (filtersActive && items.length < base.length) {
+        $("postFilterStatus").textContent =
+          "عرض " + items.length + " من " + base.length + " نتيجة (فلترة محلية — صادقة + تميّز)";
+      } else {
+        $("postFilterStatus").textContent =
+          "عرض " + items.length + " من " + base.length + " نتيجة";
+      }
     }
 
-    function resetPostFilters() {
-      $("postSort").value = "discovery_desc";
+    function resetPostFilters(mode) {
+      $("postSort").value = mode === "discover" ? "discovery_desc" : "discovery_desc";
       $("postShipping").value = "all";
       $("postChoiceOnly").checked = false;
       $("postHighRated").checked = false;
-      $("postHideSuspicious").checked = true;
+      $("postHideSuspicious").checked = false;
       $("postCurrentYear").checked = false;
       applyPostFilters();
     }
 
-    function setSearchResults(items) {
+    function setSearchResults(items, opts) {
       state.resultItems = items || [];
+      state.resultMode = (opts && opts.mode) || "search";
       const bar = $("postSearchFilters");
       if (state.resultItems.length) {
         bar.classList.remove("hidden");
-        resetPostFilters();
+        resetPostFilters(state.resultMode);
       } else {
         bar.classList.add("hidden");
         $("postFilterStatus").textContent = "";
