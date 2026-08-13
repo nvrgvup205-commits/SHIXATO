@@ -29,14 +29,17 @@ export class AliExpressApiClient {
   constructor(private readonly creds: AliExpressCredentials) {}
 
   buildAuthorizeUrl(state?: string): string {
+    const redirectUri = this.creds.callbackUrl;
     const params = new URLSearchParams({
       response_type: "code",
       client_id: this.creds.appKey,
-      redirect_uri: this.creds.callbackUrl,
-      force_auth: "true",
+      redirect_uri: redirectUri,
+      sp: "ae",
+      view: "web",
     });
     if (state) params.set("state", state);
-    return `${OAUTH_AUTHORIZE}?${params.toString()}`;
+    // Legacy host is often more stable than api-sg for browser OAuth.
+    return `https://oauth.aliexpress.com/authorize?${params.toString()}`;
   }
 
   async createTokenFromCode(code: string): Promise<AliExpressTokenResponse> {
