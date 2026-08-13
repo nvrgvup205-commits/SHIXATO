@@ -34,12 +34,10 @@ export class AliExpressApiClient {
       response_type: "code",
       client_id: this.creds.appKey,
       redirect_uri: redirectUri,
-      sp: "ae",
-      view: "web",
+      force_auth: "true",
     });
     if (state) params.set("state", state);
-    // Legacy host is often more stable than api-sg for browser OAuth.
-    return `https://oauth.aliexpress.com/authorize?${params.toString()}`;
+    return `${OAUTH_AUTHORIZE}?${params.toString()}`;
   }
 
   async createTokenFromCode(code: string): Promise<AliExpressTokenResponse> {
