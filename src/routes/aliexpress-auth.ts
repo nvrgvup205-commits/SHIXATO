@@ -8,6 +8,7 @@ import {
   loadAliExpressCredentials,
   resolveAliExpressCallbackUrl,
   saveAliExpressTokens,
+  invalidateAliExpressCredentialsCache,
 } from "../services/aliexpress-credentials";
 import { AliExpressOAuth } from "../services/aliexpress-oauth";
 import { AliExpressApi } from "../services/aliexpress-api";
@@ -150,8 +151,6 @@ aliexpressAuth.get("/aliexpress/callback", handleOAuthCallback);
 aliexpressAuth.get("/aliexpress/status", requireAuth, async (c) => {
   const status = await getAliExpressCredentialStatus(c.env);
   const creds = status.configured ? await loadAliExpressCredentials(c.env) : null;
-  const db = new SupabaseService(c.env);
-  const tokenRow = await db.getAliExpressToken().catch(() => null);
   const workerOrigin = new URL(c.req.url).origin;
 
   return c.json({
@@ -159,8 +158,8 @@ aliexpressAuth.get("/aliexpress/status", requireAuth, async (c) => {
     data: {
       ...status,
       callbackUrl: resolveAliExpressCallbackUrl(c.env),
-      hasAccessToken: Boolean(creds?.accessToken || tokenRow?.access_token),
-      tokenExpiresAt: creds?.tokenExpiresAt ?? tokenRow?.expires_at ?? null,
+      hasAccessToken: Boolean(creds?.accessToken),
+      tokenExpiresAt: creds?.tokenExpiresAt ?? null,
       connectUrl: "/api/auth/aliexpress/connect",
       appKey: creds?.appKey ?? null,
       expectedAppKey: status.expectedAppKey,
@@ -468,6 +467,7 @@ aliexpressAuth.get("/aliexpress/test", requireAuth, async (c) => {
 aliexpressAuth.delete("/aliexpress/token", requireAuth, async (c) => {
   const db = new SupabaseService(c.env);
   await db.clearAliExpressToken();
+  invalidateAliExpressCredentialsCache();
   return c.json({
     ok: true,
     data: {
@@ -607,6 +607,7 @@ async function handleOAuthCallback(c: Context<{ Bindings: Env }>): Promise<Respo
       refreshToken: token.refreshToken,
       expiresAt: token.expiresAt,
     });
+    invalidateAliExpressCredentialsCache();
 
     await auditOAuth(c.env, "aliexpress_oauth:token_exchange", {
       expires_at: token.expiresAt,
@@ -663,13 +664,14 @@ async function auditOAuth(
   status: "success" | "failed" | "partial" = "success",
   errorMessage?: string,
 ): Promise<void> {
+  if (status === "success") return;
   try {
     const db = new SupabaseService(env);
     await db.createSyncLog({
       action,
       status,
       request_payload: payload,
-      response_payload: { ok: status === "success" },
+      response_payload: { ok: false },
       error_message: errorMessage ?? null,
     });
   } catch {

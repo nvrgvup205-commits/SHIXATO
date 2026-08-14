@@ -801,6 +801,8 @@ export class AliExpressApi {
     status: "success" | "failed" = "success",
     errorMessage?: string,
   ): Promise<void> {
+    // Routine API success audits caused heavy sync_logs write egress — log failures only.
+    if (status === "success") return;
     if (!this.env?.SUPABASE_URL) return;
     try {
       const db = new SupabaseService(this.env);
@@ -810,7 +812,7 @@ export class AliExpressApi {
         aliexpress_id:
           typeof payload.product_id === "string" ? payload.product_id : null,
         request_payload: payload,
-        response_payload: { ok: status === "success" },
+        response_payload: { ok: false },
         error_message: errorMessage ?? null,
       });
     } catch {

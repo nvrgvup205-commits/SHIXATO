@@ -582,6 +582,7 @@ export class AliExpressApiClientService {
     status: CreateSyncLogInput["status"] = "success",
     errorMessage?: string,
   ): Promise<void> {
+    if (status === "success") return;
     try {
       const db = new SupabaseService(this.env);
       await db.createSyncLog({
@@ -590,7 +591,7 @@ export class AliExpressApiClientService {
         aliexpress_id:
           typeof payload.product_id === "string" ? payload.product_id : null,
         request_payload: payload,
-        response_payload: { ok: status === "success" },
+        response_payload: { ok: false },
         error_message: errorMessage ?? null,
       });
     } catch {

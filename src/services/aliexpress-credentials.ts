@@ -21,6 +21,19 @@ const ACCESS_TOKEN_KEY = "aliexpress_access_token";
 const REFRESH_TOKEN_KEY = "aliexpress_refresh_token";
 const TOKEN_EXPIRES_KEY = "aliexpress_token_expires_at";
 
+const CREDENTIALS_CACHE_TTL_MS = 5 * 60 * 1000;
+
+type CredentialsCacheEntry = {
+  value: AliExpressCredentials | null;
+  expiresAt: number;
+};
+
+let credentialsCache: CredentialsCacheEntry | null = null;
+
+export function invalidateAliExpressCredentialsCache(): void {
+  credentialsCache = null;
+}
+
 export function resolveAliExpressCallbackUrl(env: Env): string {
   const raw =
     env.ALIEXPRESS_CALLBACK_URL?.trim() ||
@@ -28,27 +41,48 @@ export function resolveAliExpressCallbackUrl(env: Env): string {
   return raw.replace(/([^:]\/)\/+/g, "$1");
 }
 
-async function readSetting(env: Env, key: string): Promise<string | null> {
+async function readSettings(
+  env: Env,
+  keys: string[],
+): Promise<Record<string, string | null>> {
   try {
     const db = new SupabaseService(env);
-    return (await db.getSetting(key))?.trim() || null;
+    const rows = await db.getSettings(keys);
+    const out: Record<string, string | null> = {};
+    for (const key of keys) {
+      const raw = rows[key];
+      out[key] = raw?.trim() || null;
+    }
+    return out;
   } catch {
-    return null;
+    return Object.fromEntries(keys.map((k) => [k, null]));
   }
 }
 
-async function resolveAppKey(env: Env): Promise<string | null> {
-  const fromEnv = env.ALIEXPRESS_APP_KEY?.trim();
-  if (fromEnv) return fromEnv;
-  const fromDb = (await readSetting(env, APP_KEY_SETTING))?.trim();
-  return fromDb || null;
+async function readSetting(env: Env, key: string): Promise<string | null> {
+  const rows = await readSettings(env, [key]);
+  return rows[key] ?? null;
 }
 
-async function resolveAppSecret(env: Env): Promise<string | null> {
+async function resolveAppKey(
+  env: Env,
+  settings?: Record<string, string | null>,
+): Promise<string | null> {
+  const fromEnv = env.ALIEXPRESS_APP_KEY?.trim();
+  if (fromEnv) return fromEnv;
+  const fromDb = settings?.[APP_KEY_SETTING] ?? (await readSetting(env, APP_KEY_SETTING));
+  return fromDb?.trim() || null;
+}
+
+async function resolveAppSecret(
+  env: Env,
+  settings?: Record<string, string | null>,
+): Promise<string | null> {
   const fromEnv = env.ALIEXPRESS_APP_SECRET?.trim();
   if (fromEnv) return fromEnv;
-  const fromDb = (await readSetting(env, APP_SECRET_SETTING))?.trim();
-  return fromDb || null;
+  const fromDb =
+    settings?.[APP_SECRET_SETTING] ?? (await readSetting(env, APP_SECRET_SETTING));
+  return fromDb?.trim() || null;
 }
 
 export async function getAliExpressSecretDiagnostics(env: Env): Promise<{
@@ -60,7 +94,10 @@ export async function getAliExpressSecretDiagnostics(env: Env): Promise<{
   secretFingerprint: string | null;
 }> {
   const envSecret = env.ALIEXPRESS_APP_SECRET?.trim();
-  const dbSecret = (await readSetting(env, APP_SECRET_SETTING))?.trim();
+  const settings = envSecret
+    ? null
+    : await readSettings(env, [APP_SECRET_SETTING]);
+  const dbSecret = envSecret ? null : settings?.[APP_SECRET_SETTING];
   const secret = envSecret || dbSecret || "";
   let secretFingerprint: string | null = null;
   if (secret) {
@@ -83,9 +120,14 @@ export async function getAliExpressSecretDiagnostics(env: Env): Promise<{
 }
 
 export async function hasAliExpressAppCredentials(env: Env): Promise<boolean> {
+  const needsDb =
+    !env.ALIEXPRESS_APP_KEY?.trim() || !env.ALIEXPRESS_APP_SECRET?.trim();
+  const settings = needsDb
+    ? await readSettings(env, [APP_KEY_SETTING, APP_SECRET_SETTING])
+    : null;
   const [appKey, appSecret] = await Promise.all([
-    resolveAppKey(env),
-    resolveAppSecret(env),
+    resolveAppKey(env, settings ?? undefined),
+    resolveAppSecret(env, settings ?? undefined),
   ]);
   return Boolean(appKey && appSecret);
 }
@@ -103,17 +145,37 @@ export async function getAliExpressCredentialStatus(env: Env): Promise<{
   secretLength: number;
   secretFingerprint: string | null;
 }> {
-  const [supabaseAppKey, supabaseAppSecret, resolvedAppKey, secretDiag] =
-    await Promise.all([
-      readSetting(env, APP_KEY_SETTING),
-      readSetting(env, APP_SECRET_SETTING),
-      resolveAppKey(env),
-      getAliExpressSecretDiagnostics(env),
-    ]);
-
   const hasEnvAppKey = Boolean(env.ALIEXPRESS_APP_KEY?.trim());
   const hasEnvAppSecret = Boolean(env.ALIEXPRESS_APP_SECRET?.trim());
-  const appKey = resolvedAppKey;
+
+  const settings =
+    hasEnvAppKey && hasEnvAppSecret
+      ? null
+      : await readSettings(env, [APP_KEY_SETTING, APP_SECRET_SETTING]);
+
+  const supabaseAppKey = hasEnvAppKey ? null : settings?.[APP_KEY_SETTING] ?? null;
+  const supabaseAppSecret = hasEnvAppSecret
+    ? null
+    : settings?.[APP_SECRET_SETTING] ?? null;
+
+  const appKey = hasEnvAppKey
+    ? env.ALIEXPRESS_APP_KEY!.trim()
+    : supabaseAppKey?.trim() || null;
+  const secret = hasEnvAppSecret
+    ? env.ALIEXPRESS_APP_SECRET!.trim()
+    : supabaseAppSecret?.trim() || "";
+
+  let secretFingerprint: string | null = null;
+  if (secret) {
+    const hash = await crypto.subtle.digest(
+      "SHA-256",
+      new TextEncoder().encode(secret),
+    );
+    secretFingerprint = Array.from(new Uint8Array(hash))
+      .map((b) => b.toString(16).padStart(2, "0"))
+      .join("")
+      .slice(0, 12);
+  }
 
   return {
     hasEnvAppKey,
@@ -126,18 +188,41 @@ export async function getAliExpressCredentialStatus(env: Env): Promise<{
     expectedAppKey: SHIXATO_ALIEXPRESS_APP_KEY,
     appKey,
     appKeyMatches: isExpectedAliExpressAppKey(appKey),
-    secretSource: secretDiag.secretSource,
-    secretLength: secretDiag.secretLength,
-    secretFingerprint: secretDiag.secretFingerprint,
+    secretSource: hasEnvAppSecret ? "env" : supabaseAppSecret ? "supabase" : "none",
+    secretLength: secret.length,
+    secretFingerprint,
   };
 }
 
-export async function loadAliExpressCredentials(env: Env): Promise<AliExpressCredentials | null> {
-  const [appKey, appSecret] = await Promise.all([
-    resolveAppKey(env),
-    resolveAppSecret(env),
-  ]);
-  if (!appKey || !appSecret) return null;
+export async function loadAliExpressCredentials(
+  env: Env,
+): Promise<AliExpressCredentials | null> {
+  const now = Date.now();
+  if (credentialsCache && credentialsCache.expiresAt > now) {
+    return credentialsCache.value;
+  }
+
+  const needsDbSettings =
+    !env.ALIEXPRESS_APP_KEY?.trim() ||
+    !env.ALIEXPRESS_APP_SECRET?.trim() ||
+    !env.ALIEXPRESS_ACCESS_TOKEN?.trim();
+
+  const settings = needsDbSettings
+    ? await readSettings(env, [
+        APP_KEY_SETTING,
+        APP_SECRET_SETTING,
+        ACCESS_TOKEN_KEY,
+        REFRESH_TOKEN_KEY,
+        TOKEN_EXPIRES_KEY,
+      ])
+    : null;
+
+  const appKey = await resolveAppKey(env, settings ?? undefined);
+  const appSecret = await resolveAppSecret(env, settings ?? undefined);
+  if (!appKey || !appSecret) {
+    credentialsCache = { value: null, expiresAt: now + CREDENTIALS_CACHE_TTL_MS };
+    return null;
+  }
 
   let accessToken = env.ALIEXPRESS_ACCESS_TOKEN?.trim() || null;
   let refreshToken: string | null = null;
@@ -150,16 +235,17 @@ export async function loadAliExpressCredentials(env: Env): Promise<AliExpressCre
       accessToken = sanitizeAccessToken(tokenRow.access_token) || accessToken;
       refreshToken = tokenRow.refresh_token?.trim() || null;
       tokenExpiresAt = tokenRow.expires_at;
-    } else {
-      accessToken = sanitizeAccessToken((await readSetting(env, ACCESS_TOKEN_KEY)) ?? undefined) || accessToken;
-      refreshToken = await readSetting(env, REFRESH_TOKEN_KEY);
-      tokenExpiresAt = await readSetting(env, TOKEN_EXPIRES_KEY);
+    } else if (settings) {
+      accessToken =
+        sanitizeAccessToken(settings[ACCESS_TOKEN_KEY] ?? undefined) || accessToken;
+      refreshToken = settings[REFRESH_TOKEN_KEY];
+      tokenExpiresAt = settings[TOKEN_EXPIRES_KEY];
     }
   } catch {
     // Supabase optional for local dev
   }
 
-  return {
+  const value: AliExpressCredentials = {
     appKey,
     appSecret,
     callbackUrl: resolveAliExpressCallbackUrl(env),
@@ -167,6 +253,9 @@ export async function loadAliExpressCredentials(env: Env): Promise<AliExpressCre
     refreshToken,
     tokenExpiresAt,
   };
+
+  credentialsCache = { value, expiresAt: now + CREDENTIALS_CACHE_TTL_MS };
+  return value;
 }
 
 export async function saveAliExpressAppCredentials(
@@ -176,6 +265,7 @@ export async function saveAliExpressAppCredentials(
   const db = new SupabaseService(env);
   await db.setSetting(APP_KEY_SETTING, input.appKey.trim());
   await db.setSetting(APP_SECRET_SETTING, input.appSecret.trim());
+  invalidateAliExpressCredentialsCache();
 }
 
 export async function hasAliExpressAccessToken(env: Env): Promise<boolean> {
@@ -193,4 +283,5 @@ export async function saveAliExpressTokens(
 ): Promise<void> {
   const db = new SupabaseService(env);
   await db.saveAliExpressToken(tokens);
+  invalidateAliExpressCredentialsCache();
 }

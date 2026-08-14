@@ -56,6 +56,87 @@ export type UpsertFavoriteInput = {
 /** Independent Postgres schema — must be listed under Exposed schemas in Supabase API settings */
 export const SUPABASE_SCHEMA = "shixato" as const;
 
+/** Catalog list — omit description_html and metadata to cut egress */
+const PRODUCT_LIST_COLUMNS =
+  "id,aliexpress_id,title,original_price,selling_price,images,status,shopify_handle,currency,created_at";
+
+/** Sync log list — omit JSON payloads (dashboard shows action/status/error only) */
+const SYNC_LOG_LIST_COLUMNS =
+  "id,action,status,error_message,aliexpress_id,created_at";
+
+const ALIEXPRESS_TOKEN_COLUMNS = "access_token,refresh_token,expires_at";
+
+const FAVORITE_LIST_COLUMNS =
+  "id,aliexpress_id,title,original_price,currency,notes,preset_grade,ai_score,list_image,hook_ar,selling_price,created_at,updated_at";
+
+type FavoriteListRow = {
+  id: string;
+  aliexpress_id: string;
+  title: string;
+  original_price: number;
+  currency: string;
+  notes?: string | null;
+  preset_grade?: string | null;
+  ai_score?: number | null;
+  list_image?: string | null;
+  hook_ar?: string | null;
+  selling_price?: number | null;
+  created_at: string;
+  updated_at?: string | null;
+};
+
+function extractFavoriteListFields(listing: Record<string, unknown>): {
+  ai_score: number | null;
+  list_image: string | null;
+  hook_ar: string | null;
+  selling_price: number | null;
+} {
+  const aiScore = Number(listing.aiScore);
+  const sellingPrice = Number(listing.sellingPrice);
+  const images = Array.isArray(listing.images) ? listing.images : [];
+  const firstImage = typeof images[0] === "string" ? images[0] : null;
+
+  return {
+    ai_score: Number.isFinite(aiScore) && aiScore > 0 ? aiScore : null,
+    list_image:
+      typeof listing.image === "string" && listing.image.trim()
+        ? listing.image.trim()
+        : firstImage?.trim() || null,
+    hook_ar:
+      typeof listing.hookAr === "string" && listing.hookAr.trim()
+        ? listing.hookAr.trim()
+        : null,
+    selling_price:
+      Number.isFinite(sellingPrice) && sellingPrice > 0 ? sellingPrice : null,
+  };
+}
+
+function slimFavoriteListing(row: FavoriteListRow): FavoriteRecord {
+  const image = row.list_image?.trim() || undefined;
+  return {
+    id: row.id,
+    aliexpress_id: row.aliexpress_id,
+    title: row.title,
+    original_price: row.original_price,
+    currency: row.currency,
+    notes: row.notes,
+    preset_grade: row.preset_grade,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+    listing: {
+      aliexpressId: row.aliexpress_id,
+      title: row.title,
+      image,
+      images: image ? [image] : [],
+      aiScore: row.ai_score ?? undefined,
+      hookAr: row.hook_ar ?? undefined,
+      sellingPrice: row.selling_price ?? undefined,
+      originalPrice: row.original_price,
+      currency: row.currency,
+    },
+  };
+}
+
 /**
  * Supabase persistence layer (service_role on Worker only).
  * All tables live in the isolated `shixato` schema (not public).
@@ -119,7 +200,7 @@ export class SupabaseService {
   }): Promise<ProductRecord[]> {
     let query = this.client
       .from("products")
-      .select("*")
+      .select(PRODUCT_LIST_COLUMNS)
       .order("created_at", { ascending: false })
       .limit(options?.limit ?? 50);
 
@@ -158,33 +239,27 @@ export class SupabaseService {
     return data as ProductRecord;
   }
 
-  async createSyncLog(input: CreateSyncLogInput): Promise<SyncLogRecord> {
-    const { data, error } = await this.client
-      .from("sync_logs")
-      .insert({
-        product_id: input.product_id ?? null,
-        aliexpress_id: input.aliexpress_id ?? null,
-        shopify_product_id: input.shopify_product_id ?? null,
-        action: input.action,
-        status: input.status,
-        request_payload: input.request_payload ?? null,
-        response_payload: input.response_payload ?? null,
-        error_message: input.error_message ?? null,
-      })
-      .select("*")
-      .single();
+  async createSyncLog(input: CreateSyncLogInput): Promise<void> {
+    const { error } = await this.client.from("sync_logs").insert({
+      product_id: input.product_id ?? null,
+      aliexpress_id: input.aliexpress_id ?? null,
+      shopify_product_id: input.shopify_product_id ?? null,
+      action: input.action,
+      status: input.status,
+      request_payload: input.request_payload ?? null,
+      response_payload: input.response_payload ?? null,
+      error_message: input.error_message ?? null,
+    });
 
     if (error) {
       throw new HttpError(500, "Failed to create sync log", error);
     }
-
-    return data as SyncLogRecord;
   }
 
   async listSyncLogs(limit = 50): Promise<SyncLogRecord[]> {
     const { data, error } = await this.client
       .from("sync_logs")
-      .select("*")
+      .select(SYNC_LOG_LIST_COLUMNS)
       .order("created_at", { ascending: false })
       .limit(limit);
 
@@ -211,6 +286,32 @@ export class SupabaseService {
     return typeof data?.value === "string" ? data.value : null;
   }
 
+  /** Batch-read settings in one query (cuts egress vs N separate getSetting calls). */
+  async getSettings(keys: string[]): Promise<Record<string, string | null>> {
+    const unique = [...new Set(keys.filter(Boolean))];
+    const out: Record<string, string | null> = Object.fromEntries(
+      unique.map((k) => [k, null]),
+    );
+    if (!unique.length) return out;
+
+    const { data, error } = await this.client
+      .from("app_settings")
+      .select("key,value")
+      .in("key", unique);
+
+    if (error) {
+      console.warn("getSettings failed", error.message);
+      return out;
+    }
+
+    for (const row of data ?? []) {
+      const key = typeof row.key === "string" ? row.key : "";
+      if (!key) continue;
+      out[key] = typeof row.value === "string" ? row.value : null;
+    }
+    return out;
+  }
+
   async setSetting(key: string, value: string): Promise<void> {
     const { error } = await this.client.from("app_settings").upsert(
       {
@@ -230,36 +331,21 @@ export class SupabaseService {
     accessToken: string;
     refreshToken?: string | null;
     expiresAt?: string | null;
-  }): Promise<AliExpressTokenRecord> {
-    const { data, error } = await this.client
-      .from("aliexpress_tokens")
-      .upsert(
-        {
-          id: "default",
-          access_token: input.accessToken,
-          refresh_token: input.refreshToken ?? null,
-          expires_at: input.expiresAt ?? null,
-          updated_at: new Date().toISOString(),
-        },
-        { onConflict: "id" },
-      )
-      .select("*")
-      .single();
+  }): Promise<void> {
+    const { error } = await this.client.from("aliexpress_tokens").upsert(
+      {
+        id: "default",
+        access_token: input.accessToken,
+        refresh_token: input.refreshToken ?? null,
+        expires_at: input.expiresAt ?? null,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "id" },
+    );
 
     if (error) {
       throw new HttpError(500, "Failed to save AliExpress token", error);
     }
-
-    // Backward compatibility with app_settings readers
-    await this.setSetting("aliexpress_access_token", input.accessToken);
-    if (input.refreshToken) {
-      await this.setSetting("aliexpress_refresh_token", input.refreshToken);
-    }
-    if (input.expiresAt) {
-      await this.setSetting("aliexpress_token_expires_at", input.expiresAt);
-    }
-
-    return data as AliExpressTokenRecord;
   }
 
   async clearAliExpressToken(): Promise<void> {
@@ -271,16 +357,12 @@ export class SupabaseService {
     if (error) {
       throw new HttpError(500, "Failed to clear AliExpress token", error);
     }
-
-    await this.setSetting("aliexpress_access_token", "");
-    await this.setSetting("aliexpress_refresh_token", "");
-    await this.setSetting("aliexpress_token_expires_at", "");
   }
 
   async getAliExpressToken(): Promise<AliExpressTokenRecord | null> {
     const { data, error } = await this.client
       .from("aliexpress_tokens")
-      .select("*")
+      .select(ALIEXPRESS_TOKEN_COLUMNS)
       .eq("id", "default")
       .maybeSingle();
 
@@ -293,11 +375,13 @@ export class SupabaseService {
   }
 
   async upsertFavorite(input: UpsertFavoriteInput): Promise<FavoriteRecord> {
+    const listFields = extractFavoriteListFields(input.listing);
     const { data, error } = await this.client
       .from("favorites")
       .upsert(
         {
           ...input,
+          ...listFields,
           updated_at: new Date().toISOString(),
         },
         { onConflict: "aliexpress_id" },
@@ -313,25 +397,19 @@ export class SupabaseService {
   }
 
   async listFavorites(limit = 100): Promise<FavoriteRecord[]> {
+    const capped = Math.min(Math.max(limit, 1), 100);
     const { data, error } = await this.client
       .from("favorites")
-      .select("*")
+      .select(FAVORITE_LIST_COLUMNS)
+      .order("ai_score", { ascending: false, nullsFirst: false })
       .order("created_at", { ascending: false })
-      .limit(Math.max(limit, 200));
+      .limit(capped);
 
     if (error) {
       throw new HttpError(500, "Failed to list favorites", error);
     }
 
-    const rows = (data as FavoriteRecord[]) ?? [];
-    return rows
-      .sort((a, b) => {
-        const sa = Number((a.listing as { aiScore?: number })?.aiScore ?? 0);
-        const sb = Number((b.listing as { aiScore?: number })?.aiScore ?? 0);
-        if (sb !== sa) return sb - sa;
-        return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
-      })
-      .slice(0, limit);
+    return ((data as FavoriteListRow[]) ?? []).map(slimFavoriteListing);
   }
 
   async updateFavorite(
@@ -342,12 +420,15 @@ export class SupabaseService {
       listing?: Record<string, unknown>;
     },
   ): Promise<FavoriteRecord> {
+    const listFields =
+      input.listing != null ? extractFavoriteListFields(input.listing) : {};
     const { data, error } = await this.client
       .from("favorites")
       .update({
         ...(input.title != null ? { title: input.title } : {}),
         ...(input.notes !== undefined ? { notes: input.notes } : {}),
         ...(input.listing != null ? { listing: input.listing } : {}),
+        ...listFields,
         updated_at: new Date().toISOString(),
       })
       .eq("id", id)
