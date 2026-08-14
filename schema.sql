@@ -180,6 +180,10 @@ CREATE TABLE IF NOT EXISTS shixato.favorites (
   listing JSONB NOT NULL DEFAULT '{}'::jsonb,
   notes TEXT,
   preset_grade TEXT,
+  ai_score NUMERIC(8, 2),
+  list_image TEXT,
+  hook_ar TEXT,
+  selling_price NUMERIC(12, 2),
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   CONSTRAINT favorites_aliexpress_id_key UNIQUE (aliexpress_id)
@@ -187,6 +191,9 @@ CREATE TABLE IF NOT EXISTS shixato.favorites (
 
 CREATE INDEX IF NOT EXISTS idx_favorites_created_at
   ON shixato.favorites (created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_favorites_ai_score_created
+  ON shixato.favorites (ai_score DESC NULLS LAST, created_at DESC);
 
 COMMENT ON TABLE shixato.favorites IS 'Dashboard review queue — AliExpress listings saved before Shopify import';
 

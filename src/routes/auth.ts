@@ -41,13 +41,17 @@ auth.get("/hint", async (c) => {
   const envPin = getEnvDashboardPin(c.env);
   let pinSource: "supabase" | "env" = "env";
   let supabaseReachable = false;
-  try {
-    const db = new SupabaseService(c.env);
-    const stored = await db.getSetting("dashboard_pin");
-    supabaseReachable = true;
-    if (stored?.trim()) pinSource = "supabase";
-  } catch {
-    supabaseReachable = false;
+
+  // Skip Supabase when PIN is set in env — saves egress on every login page load.
+  if (!envPin || envPin === "1111") {
+    try {
+      const db = new SupabaseService(c.env);
+      const stored = await db.getSetting("dashboard_pin");
+      supabaseReachable = true;
+      if (stored?.trim()) pinSource = "supabase";
+    } catch {
+      supabaseReachable = false;
+    }
   }
 
   return c.json({
@@ -75,19 +79,10 @@ auth.post("/logout", async (c) => {
 auth.get("/me", async (c) => {
   const cookie = getCookie(c, "shixato_session");
   const ok = await verifySessionToken(c.env, cookie);
-  let pinSource: "supabase" | "env" = "env";
-  try {
-    const db = new SupabaseService(c.env);
-    const stored = await db.getSetting("dashboard_pin");
-    if (stored?.trim()) pinSource = "supabase";
-  } catch {
-    // Supabase unavailable — env PIN still works
-  }
   return c.json({
     ok: true,
     data: {
       authenticated: ok,
-      pinSource,
       multiSession: true,
     },
   });

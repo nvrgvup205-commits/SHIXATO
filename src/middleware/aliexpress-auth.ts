@@ -1,6 +1,7 @@
 import type { Context, MiddlewareHandler } from "hono";
 import {
   hasAliExpressAppCredentials,
+  invalidateAliExpressCredentialsCache,
   loadAliExpressCredentials,
 } from "../services/aliexpress-credentials";
 import { AliExpressOAuth } from "../services/aliexpress-oauth";
@@ -159,6 +160,7 @@ async function persistRefreshedToken(
     refreshToken: token.refreshToken,
     expiresAt: token.expiresAt,
   });
+  invalidateAliExpressCredentialsCache();
 }
 
 export function getAliExpressTokenFromContext(

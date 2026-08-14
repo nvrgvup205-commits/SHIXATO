@@ -145,7 +145,6 @@ export class ImportPipeline {
         response_payload: {
           id: created.id,
           handle: created.handle,
-          variants: created.variants,
         },
       });
 

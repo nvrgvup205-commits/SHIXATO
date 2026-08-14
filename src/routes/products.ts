@@ -17,7 +17,7 @@ products.get("/", requireAuth, async (c) => {
   const q = (c.req.query("q") ?? "").trim().toLowerCase();
   let rows = await pipeline.dbService.listProducts({
     status,
-    limit: Math.max(limit, 100),
+    limit: Math.min(Math.max(limit, 1), 100),
   });
   if (q) {
     rows = rows.filter(
