@@ -270,6 +270,62 @@ export class SupabaseService {
     return (data as SyncLogRecord[]) ?? [];
   }
 
+  /**
+   * Delete old sync_logs and strip payloads on semi-old rows.
+   * Uses DB function when available; falls back to direct delete.
+   */
+  async pruneSyncLogs(retentionDays = 14): Promise<number> {
+    const days = Math.min(Math.max(retentionDays, 1), 365);
+
+    const { data: rpcCount, error: rpcError } = await this.client.rpc(
+      "prune_sync_logs",
+      { retention_days: days },
+    );
+
+    if (!rpcError && typeof rpcCount === "number") {
+      return rpcCount;
+    }
+
+    const cutoff = new Date(Date.now() - days * 86_400_000).toISOString();
+    const { data, error } = await this.client
+      .from("sync_logs")
+      .delete()
+      .lt("created_at", cutoff)
+      .select("id");
+
+    if (error) {
+      throw new HttpError(500, "Failed to prune sync logs", error);
+    }
+
+    return data?.length ?? 0;
+  }
+
+  /** Run retention cleanup at most once per 24h (non-blocking for callers). */
+  scheduleSyncLogPrune(retentionDays = 14): void {
+    void this.maybePruneSyncLogs(retentionDays);
+  }
+
+  private async maybePruneSyncLogs(retentionDays: number): Promise<void> {
+    const lastPruneKey = "sync_logs_last_prune_at";
+    const pruneIntervalMs = 24 * 60 * 60 * 1000;
+
+    try {
+      const last = await this.getSetting(lastPruneKey);
+      const lastMs = last ? Date.parse(last) : 0;
+      if (Number.isFinite(lastMs) && Date.now() - lastMs < pruneIntervalMs) {
+        return;
+      }
+
+      const removed = await this.pruneSyncLogs(retentionDays);
+      await this.setSetting(lastPruneKey, new Date().toISOString());
+      if (removed > 0) {
+        console.log(`pruned ${removed} sync_logs (retention ${retentionDays}d)`);
+      }
+    } catch (err) {
+      console.warn("sync_logs prune skipped", err);
+    }
+  }
+
   async getSetting(key: string): Promise<string | null> {
     const { data, error } = await this.client
       .from("app_settings")

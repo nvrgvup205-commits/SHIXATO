@@ -56,6 +56,7 @@ app.get("/", (c) => {
       import: "POST /api/products/import",
       list: "GET /api/products",
       logs: "GET /api/sync/logs",
+      pruneLogs: "POST /api/sync/prune",
     },
   });
 });
